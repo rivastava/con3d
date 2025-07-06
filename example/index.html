@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Con3D Material Configurator</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', sans-serif;
+            background: #f9fafb;
+        }
+        
+        #con3d-container {
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background: white;
+        }
+        
+        .error {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background: #fef2f2;
+            color: #dc2626;
+            text-align: center;
+            padding: 2rem;
+        }
+    </style>
+</head>
+<body>
+    <div id="con3d-container">
+        <div class="loading">
+            <div>Loading Con3D Material Configurator...</div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeCon3D } from './dist/con3d-material-configurator.es.js';
+
+        // Initialize the configurator
+        try {
+            const configurator = initializeCon3D({
+                apiKey: 'demo-api-key',
+                containerId: 'con3d-container',
+                options: {
+                    renderer: {
+                        antialias: true,
+                        toneMapping: 2, // ACESFilmicToneMapping
+                        toneMappingExposure: 1.0,
+                        shadowMapType: 1 // PCFSoftShadowMap
+                    },
+                    camera: {
+                        fov: 75,
+                        position: [5, 5, 5]
+                    },
+                    controls: {
+                        enableDamping: true,
+                        autoRotate: false
+                    },
+                    ui: {
+                        theme: 'light',
+                        showStats: false,
+                        showGridHelper: true,
+                        showAxesHelper: false
+                    }
+                }
+            });
+
+            // Handle ready event
+            configurator.events.on('ready', () => {
+                console.log('Con3D Configurator is ready!');
+                
+                // Load a demo model
+                loadDemoContent(configurator);
+            });
+
+            // Handle errors
+            configurator.events.on('error', (error) => {
+                console.error('Con3D Error:', error);
+                document.getElementById('con3d-container').innerHTML = 
+                    '<div class="error"><div><h2>Error Loading Configurator</h2><p>' + error.message + '</p></div></div>';
+            });
+
+            async function loadDemoContent(configurator) {
+                try {
+                    // Create a demo material
+                    const demoMaterial = await configurator.material.create({
+                        name: 'Demo Material',
+                        type: 'physical',
+                        parameters: {
+                            baseColor: '#ff6b35',
+                            metalness: 0.8,
+                            roughness: 0.2,
+                            emissive: '#000000',
+                            emissiveIntensity: 0
+                        }
+                    });
+
+                    console.log('Demo material created:', demoMaterial);
+
+                    // Set up demo environment
+                    await configurator.environment.set({
+                        id: 'demo-env',
+                        name: 'Demo Environment',
+                        type: 'gradient',
+                        parameters: {
+                            topColor: '#87CEEB',
+                            bottomColor: '#FFFFFF',
+                            groundColor: '#444444'
+                        }
+                    });
+
+                    // Add some demo lights
+                    await configurator.lighting.add({
+                        id: 'demo-key-light',
+                        name: 'Key Light',
+                        type: 'directional',
+                        parameters: {
+                            color: '#ffffff',
+                            intensity: 1.2,
+                            position: [10, 10, 5],
+                            castShadow: true
+                        }
+                    });
+
+                } catch (error) {
+                    console.error('Error loading demo content:', error);
+                }
+            }
+
+        } catch (error) {
+            console.error('Failed to initialize Con3D:', error);
+            document.getElementById('con3d-container').innerHTML = 
+                '<div class="error"><div><h2>Initialization Error</h2><p>' + error.message + '</p></div></div>';
+        }
+    </script>
+</body>
+</html>
