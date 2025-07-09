@@ -15,6 +15,9 @@ export class AdvancedLightingSystem {
   // Caustics simulation (fake)
   private causticsTexture?: THREE.Texture;
   
+  // Light linking system
+  private lightLinks: Map<string, { lightId: string; meshId: string; enabled: boolean; influence: number }> = new Map();
+  
   constructor(scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
     this.scene = scene;
     this.renderer = renderer;
@@ -260,5 +263,232 @@ export class AdvancedLightingSystem {
       child.name?.startsWith('pro-')
     );
     lightsToRemove.forEach(light => this.scene.remove(light));
+  }
+  
+  /**
+   * Enable or disable light linking for a specific light-mesh combination
+   */
+  public setLightLink(lightId: string, meshId: string, enabled: boolean, influence: number = 1.0): void {
+    const linkKey = `${lightId}-${meshId}`;
+    this.lightLinks.set(linkKey, { lightId, meshId, enabled, influence });
+    this.applyLightLinking();
+  }
+
+  /**
+   * Get light link status for a specific light-mesh combination
+   */
+  public getLightLink(lightId: string, meshId: string): { enabled: boolean; influence: number } | null {
+    const linkKey = `${lightId}-${meshId}`;
+    const link = this.lightLinks.get(linkKey);
+    return link ? { enabled: link.enabled, influence: link.influence } : null;
+  }
+
+  /**
+   * Remove light linking for a specific combination
+   */
+  public removeLightLink(lightId: string, meshId: string): void {
+    const linkKey = `${lightId}-${meshId}`;
+    this.lightLinks.delete(linkKey);
+    this.applyLightLinking();
+  }
+
+  /**
+   * Enable a light for all meshes
+   */
+  public enableLightForAllMeshes(lightId: string): void {
+    this.scene.traverse((object) => {
+      if (object instanceof THREE.Mesh && object.uuid) {
+        this.setLightLink(lightId, object.uuid, true, 1.0);
+      }
+    });
+  }
+
+  /**
+   * Disable a light for all meshes
+   */
+  public disableLightForAllMeshes(lightId: string): void {
+    this.scene.traverse((object) => {
+      if (object instanceof THREE.Mesh && object.uuid) {
+        this.setLightLink(lightId, object.uuid, false, 0.0);
+      }
+    });
+  }
+
+  /**
+   * Enable all lights for a specific mesh
+   */
+  public enableAllLightsForMesh(meshId: string): void {
+    this.scene.traverse((object) => {
+      if (object instanceof THREE.Light && object.uuid) {
+        this.setLightLink(object.uuid, meshId, true, 1.0);
+      }
+    });
+  }
+
+  /**
+   * Disable all lights for a specific mesh
+   */
+  public disableAllLightsForMesh(meshId: string): void {
+    this.scene.traverse((object) => {
+      if (object instanceof THREE.Light && object.uuid) {
+        this.setLightLink(object.uuid, meshId, false, 0.0);
+      }
+    });
+  }
+
+  /**
+   * Apply light linking by modifying mesh materials with custom shader chunks
+   */
+  private applyLightLinking(): void {
+    this.scene.traverse((object) => {
+      if (object instanceof THREE.Mesh && object.material) {
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        
+        materials.forEach((material) => {
+          if (material instanceof THREE.MeshStandardMaterial || material instanceof THREE.MeshPhysicalMaterial) {
+            this.applyLightLinkingToMaterial(material, object.uuid);
+          }
+        });
+      }
+    });
+  }
+
+  /**
+   * Apply light linking to a specific material by modifying shader chunks
+   */
+  private applyLightLinkingToMaterial(material: THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial, meshId: string): void {
+    const excludedLights: string[] = [];
+    const lightInfluences: { [lightId: string]: number } = {};
+
+    // Collect disabled lights and influences for this mesh
+    for (const [, link] of this.lightLinks) {
+      if (link.meshId === meshId) {
+        if (!link.enabled) {
+          excludedLights.push(link.lightId);
+        }
+        lightInfluences[link.lightId] = link.influence;
+      }
+    }
+
+    // Store light linking data on the material for custom shader processing
+    (material as any).userData = {
+      ...((material as any).userData || {}),
+      excludedLights,
+      lightInfluences,
+      hasLightLinking: excludedLights.length > 0 || Object.keys(lightInfluences).some(id => lightInfluences[id] !== 1.0)
+    };
+
+    // If we have light linking, we need to use custom shader chunks
+    if ((material as any).userData.hasLightLinking) {
+      this.applyCustomLightingShader(material, excludedLights, lightInfluences);
+    } else {
+      // Remove custom shader if no light linking
+      this.removeCustomLightingShader(material);
+    }
+
+    material.needsUpdate = true;
+  }
+
+  /**
+   * Apply custom lighting shader chunks for light linking
+   */
+  private applyCustomLightingShader(
+    material: THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial,
+    _excludedLights: string[],
+    _lightInfluences: { [lightId: string]: number }
+  ): void {
+    // Custom shader chunk to modify light contributions
+    const lightLinkingChunk = `
+      // Light linking modification
+      vec3 lightLinkingModifier(vec3 lightContribution, int lightIndex) {
+        // This is a simplified approach - in a full implementation,
+        // you would need to track light indices and apply influences
+        return lightContribution;
+      }
+    `;
+
+    // Store the original onBeforeCompile if it exists
+    const originalOnBeforeCompile = material.onBeforeCompile;
+
+    material.onBeforeCompile = (shader, renderer) => {
+      // Call original onBeforeCompile if it exists
+      if (originalOnBeforeCompile) {
+        originalOnBeforeCompile(shader, renderer);
+      }
+
+      // Add our custom light linking code
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <lights_physical_fragment>',
+        `
+        ${lightLinkingChunk}
+        #include <lights_physical_fragment>
+        `
+      );
+
+      // Store shader reference for potential updates
+      (material as any).userData.customShader = shader;
+    };
+  }
+
+  /**
+   * Remove custom lighting shader
+   */
+  private removeCustomLightingShader(material: THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial): void {
+    (material as any).onBeforeCompile = undefined;
+    delete (material as any).userData.customShader;
+  }
+
+  /**
+   * Get all lights in the scene
+   */
+  public getLights(): { id: string; name: string; type: string; light: THREE.Light }[] {
+    const lights: { id: string; name: string; type: string; light: THREE.Light }[] = [];
+    
+    this.scene.traverse((object) => {
+      if (object instanceof THREE.Light) {
+        lights.push({
+          id: object.uuid,
+          name: object.name || `${object.type} ${object.uuid.slice(0, 8)}`,
+          type: object.type,
+          light: object
+        });
+      }
+    });
+    
+    return lights;
+  }
+
+  /**
+   * Get all meshes in the scene
+   */
+  public getMeshes(): { id: string; name: string; mesh: THREE.Mesh }[] {
+    const meshes: { id: string; name: string; mesh: THREE.Mesh }[] = [];
+    
+    this.scene.traverse((object) => {
+      if (object instanceof THREE.Mesh && object.name && !object.name.includes('Helper')) {
+        meshes.push({
+          id: object.uuid,
+          name: object.name || `Mesh ${object.uuid.slice(0, 8)}`,
+          mesh: object
+        });
+      }
+    });
+    
+    return meshes;
+  }
+
+  /**
+   * Get all light links
+   */
+  public getAllLightLinks(): { lightId: string; meshId: string; enabled: boolean; influence: number }[] {
+    return Array.from(this.lightLinks.values());
+  }
+
+  /**
+   * Clear all light links
+   */
+  public clearAllLightLinks(): void {
+    this.lightLinks.clear();
+    this.applyLightLinking();
   }
 }

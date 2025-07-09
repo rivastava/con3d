@@ -1,16 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import * as THREE from 'three';
 import { Con3DConfigurator } from '@/core/Con3DConfigurator';
-import { MaterialEditor } from './MaterialEditorEnhanced';
+import { MaterialEditor } from './MaterialEditor';
 import { MaterialLibrary } from './MaterialLibrary';
 import { SceneControls } from './SceneControls';
 import { TransformControls } from './TransformControls';
+import { TransformControlsPanel } from './TransformControlsPanel';
+import { SelectionDebugPanel } from './SelectionDebugPanel';
 import { LightingControls } from './LightingControls';
 import { CameraControls } from './CameraControls';
 import { ObjectSettingsControls } from './ObjectSettingsControls';
 import { PrimitiveControls } from './PrimitiveControls';
 import { RenderingQualityControls } from './RenderingQualityControls';
 import { Outliner } from './Outliner';
+import { LightLinker } from './LightLinker';
 
 interface DualSidebarProps {
   configurator?: Con3DConfigurator;
@@ -29,7 +32,7 @@ export const DualSidebar: React.FC<DualSidebarProps> = ({
 }) => {
   const [selectedMesh, setSelectedMesh] = useState<THREE.Mesh | null>(null);
   const [leftActiveTab, setLeftActiveTab] = useState<'material' | 'objects' | 'transform' | 'primitives'>('material');
-  const [rightActiveTab, setRightActiveTab] = useState<'outliner' | 'lighting' | 'camera' | 'library' | 'scene' | 'rendering'>('outliner');
+  const [rightActiveTab, setRightActiveTab] = useState<'outliner' | 'lighting' | 'camera' | 'library' | 'scene' | 'rendering' | 'lightlink'>('outliner');
 
   // Use the prop selectedMesh directly when available
   const currentSelectedMesh = propSelectedMesh !== undefined ? propSelectedMesh : selectedMesh;
@@ -128,10 +131,18 @@ export const DualSidebar: React.FC<DualSidebarProps> = ({
             />
           )}
           {leftActiveTab === 'transform' && (
-            <TransformControls
-              configurator={configurator}
-              selectedMesh={currentSelectedMesh}
-            />
+            <div className="p-4 space-y-4">
+              <TransformControlsPanel
+                configurator={configurator}
+              />
+              <SelectionDebugPanel
+                configurator={configurator}
+              />
+              <TransformControls
+                configurator={configurator}
+                selectedMesh={currentSelectedMesh}
+              />
+            </div>
           )}
           {leftActiveTab === 'objects' && (
             <ObjectSettingsControls
@@ -188,6 +199,16 @@ export const DualSidebar: React.FC<DualSidebarProps> = ({
         </nav>
         <nav className="flex text-xs border-t border-gray-700">
           <button
+            onClick={() => setRightActiveTab('lightlink')}
+            className={`flex-1 px-2 py-2 font-medium ${
+              rightActiveTab === 'lightlink'
+                ? 'text-white bg-gray-800 border-b-2 border-yellow-500'
+                : 'text-gray-400 hover:text-white hover:bg-gray-800'
+            }`}
+          >
+            Light Link
+          </button>
+          <button
             onClick={() => setRightActiveTab('library')}
             className={`flex-1 px-2 py-2 font-medium ${
               rightActiveTab === 'library'
@@ -234,8 +255,18 @@ export const DualSidebar: React.FC<DualSidebarProps> = ({
             configurator={configurator}
           />
         )}
+        {rightActiveTab === 'lightlink' && (
+          <LightLinker
+            configurator={configurator}
+          />
+        )}
         {rightActiveTab === 'camera' && (
           <CameraControls
+            configurator={configurator}
+          />
+        )}
+        {rightActiveTab === 'lightlink' && (
+          <LightLinker
             configurator={configurator}
           />
         )}

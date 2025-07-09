@@ -104,19 +104,29 @@ export class SceneTransformControls {
         return;
       }
 
-      // Professional keyboard shortcuts (Blender/Maya style)
+      // Professional keyboard shortcuts (Blender style with W/E/R)
       switch (event.code) {
-        case 'KeyG': // G for Grab/Translate
+        case 'KeyW': // W for Translate (Move)
           event.preventDefault();
           this.setMode('translate');
           this.focusOnGizmo();
           break;
-        case 'KeyR': // R for Rotate
+        case 'KeyE': // E for Rotate
           event.preventDefault();
           this.setMode('rotate');
           this.focusOnGizmo();
           break;
-        case 'KeyS': // S for Scale
+        case 'KeyR': // R for Scale
+          event.preventDefault();
+          this.setMode('scale');
+          this.focusOnGizmo();
+          break;
+        case 'KeyG': // G for Grab/Translate (alternative)
+          event.preventDefault();
+          this.setMode('translate');
+          this.focusOnGizmo();
+          break;
+        case 'KeyS': // S for Scale (alternative)
           event.preventDefault();
           this.setMode('scale');
           this.focusOnGizmo();

@@ -14,6 +14,7 @@ export class LightingManager {
    * Add default lighting setup
    */
   public addDefaultLights(): void {
+    console.log('🌞 Adding default ambient light...');
     // Ambient light
     this.addLight({
       id: 'default-ambient',
@@ -26,6 +27,7 @@ export class LightingManager {
       visible: true
     });
 
+    console.log('☀️ Adding default main directional light...');
     // Main directional light
     this.addLight({
       id: 'default-main',
@@ -50,6 +52,7 @@ export class LightingManager {
       visible: true
     });
 
+    console.log('💡 Adding default fill light...');
     // Fill light
     this.addLight({
       id: 'default-fill',
@@ -63,12 +66,15 @@ export class LightingManager {
       },
       visible: true
     });
+    
+    console.log(`✅ Default lighting setup complete. Total lights: ${this.lights.size}`);
   }
 
   /**
    * Add a light to the scene
    */
   public addLight(config: LightConfig): void {
+    console.log(`🔆 Creating light: ${config.name} (${config.type})`);
     let light: THREE.Light;
 
     switch (config.type) {
@@ -95,13 +101,38 @@ export class LightingManager {
     light.visible = config.visible !== false;
     light.userData = { id: config.id, config };
 
+    // Add a small invisible sphere to make lights selectable
+    const lightSelector = new THREE.Mesh(
+      new THREE.SphereGeometry(0.5, 8, 8),
+      new THREE.MeshBasicMaterial({ 
+        color: 0xffff00, 
+        transparent: true, 
+        opacity: 0.0, // Invisible but raycastable
+        visible: false // Don't render but allow raycasting
+      })
+    );
+    lightSelector.name = `${config.name}_selector`;
+    lightSelector.userData = { 
+      isLightSelector: true, 
+      lightId: config.id, 
+      parentLight: light,
+      selectable: true 
+    };
+    lightSelector.position.copy(light.position);
+    light.add(lightSelector);
+
     this.lights.set(config.id, light);
     this.lightConfigs.set(config.id, config);
     this.scene.add(light);
+    
+    console.log(`✅ Added ${config.type} light "${config.name}" to scene at position:`, light.position.toArray());
 
-    // Add target helper for directional and spot lights
+    // Add target for directional and spot lights (but mark as non-selectable)
     if (light instanceof THREE.DirectionalLight || light instanceof THREE.SpotLight) {
+      light.target.name = `${config.name}_target`;
+      light.target.userData = { selectable: false, isLightTarget: true };
       this.scene.add(light.target);
+      console.log(`🎯 Added target for ${config.type} light at:`, light.target.position.toArray());
     }
   }
 

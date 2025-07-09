@@ -79,8 +79,52 @@ export const Outliner: React.FC<OutlinerProps> = ({
     if (object.name.includes('Helper')) return false;
     if (object.name.includes('gizmo')) return false;
     if (object.userData.hideInOutliner) return false;
+    if (object.userData.isHelper) return false;
+    if (object.userData.isLightTarget) return false;
+    if (object.userData.isLightSelector) return false;
+    if (object.userData.isTransformControls) return false;
+    if (object.userData.isSelectionHelper) return false;
     
-    return true;
+    // Exclude specific helper types
+    const excludedTypes = [
+      'GridHelper',
+      'AxesHelper', 
+      'ArrowHelper',
+      'BoxHelper',
+      'PlaneHelper',
+      'PointLightHelper',
+      'DirectionalLightHelper',
+      'SpotLightHelper',
+      'HemisphereLightHelper',
+      'CameraHelper'
+    ];
+    
+    if (excludedTypes.includes(object.type)) return false;
+    
+    // Exclude unnamed Object3D (usually light targets or helpers)
+    if (object.type === 'Object3D' && (!object.name || object.name === '')) return false;
+    if (object.type === 'Object3D' && object.name.includes('_target')) return false;
+    if (object.type === 'Object3D' && object.name.includes('_selector')) return false;
+    
+    // Only show meaningful objects
+    const meaningfulTypes = [
+      'Mesh', 
+      'Group', 
+      'DirectionalLight', 
+      'PointLight', 
+      'SpotLight', 
+      'AmbientLight', 
+      'HemisphereLight', 
+      'RectAreaLight',
+      'PerspectiveCamera',
+      'OrthographicCamera'
+    ];
+    
+    return meaningfulTypes.includes(object.type) || 
+           (object instanceof THREE.Mesh) ||
+           (object instanceof THREE.Light) ||
+           (object instanceof THREE.Camera) ||
+           (object instanceof THREE.Group && object.children.length > 0);
   };
 
   const getObjectTypeName = (object: THREE.Object3D): string => {

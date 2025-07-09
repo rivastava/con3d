@@ -88,24 +88,57 @@ export class Con3DConfigurator extends EventEmitter implements Con3DAPI {
 
   private setupInitialScene(): void {
     try {
+      console.log('🎬 Starting scene setup...');
+      
       // Add default lighting
+      console.log('💡 Adding default lights...');
       this.lightingManager.addDefaultLights();
       
+      // Verify lights were added
+      const scene = this.renderingEngine.getScene();
+      const lights = scene.children.filter(child => child instanceof THREE.Light);
+      console.log(`✅ Added ${lights.length} lights to scene:`, lights.map(l => `${l.name || l.type} (${l.type})`));
+      
       // Set default environment
+      console.log('🌍 Setting default environment...');
       this.environmentManager.setDefaultEnvironment();
+      
+      // Add default test objects
+      console.log('📦 Adding default test objects...');
+      this.addDefaultTestObjects();
+      
+      // Verify objects were added
+      const meshes = scene.children.filter(child => child instanceof THREE.Mesh);
+      console.log(`✅ Added ${meshes.length} meshes to scene:`, meshes.map(m => m.name || 'Unnamed'));
       
       // Add grid helper if enabled
       if (this.options.ui?.showGridHelper) {
+        console.log('📏 Adding grid helper...');
         this.addGridHelper();
       }
       
       // Add axes helper if enabled
       if (this.options.ui?.showAxesHelper) {
+        console.log('🎯 Adding axes helper...');
         this.addAxesHelper();
       }
       
+      // Print final scene stats
+      console.log(`🎯 Scene setup completed! Total children: ${scene.children.length}`);
+      console.log('Scene contents:', scene.children.map(child => ({
+        name: child.name || 'Unnamed',
+        type: child.type,
+        visible: child.visible,
+        position: child.position.toArray()
+      })));
+      
+      // Check camera position
+      const camera = this.renderingEngine.getCamera();
+      console.log('📷 Camera position:', camera.position.toArray());
+      console.log('📷 Camera looking at:', camera.getWorldDirection(new THREE.Vector3()).toArray());
+      
     } catch (error) {
-      console.error('Error setting up initial scene:', error);
+      console.error('❌ Error setting up initial scene:', error);
       throw error;
     }
   }
@@ -338,6 +371,10 @@ export class Con3DConfigurator extends EventEmitter implements Con3DAPI {
     return this.renderingEngine.getSelectedMesh();
   }
 
+  public getAdvancedLightingSystem() {
+    return this.renderingEngine.getEnhancedRenderingManager().getAdvancedLightingSystem();
+  }
+
   // Camera and clipping controls
   public adjustCameraClipping(near?: number, far?: number) {
     this.renderingEngine.adjustCameraClipping(near, far);
@@ -431,6 +468,31 @@ export class Con3DConfigurator extends EventEmitter implements Con3DAPI {
     return this.renderingEngine;
   }
 
+  // Transform controls methods
+  public enableTransformControls(): void {
+    this.renderingEngine.enableTransformControls();
+  }
+
+  public disableTransformControls(): void {
+    this.renderingEngine.disableTransformControls();
+  }
+
+  public isTransformControlsEnabled(): boolean {
+    return this.renderingEngine.isTransformControlsEnabled();
+  }
+
+  public setTransformMode(mode: 'translate' | 'rotate' | 'scale'): void {
+    this.renderingEngine.setTransformMode(mode);
+  }
+
+  public getTransformMode(): 'translate' | 'rotate' | 'scale' {
+    return this.renderingEngine.getTransformMode();
+  }
+
+  public getNonInterferingTransformControls() {
+    return this.renderingEngine.getNonInterferingTransformControls();
+  }
+
   private generateId(): string {
     return Math.random().toString(36).substr(2, 9);
   }
@@ -464,15 +526,99 @@ export class Con3DConfigurator extends EventEmitter implements Con3DAPI {
     controls.update();
   }
 
+  // Object selectability and visibility controls (Blender-style)
+  public setObjectSelectable(object: THREE.Object3D, selectable: boolean): void {
+    this.renderingEngine.setObjectSelectable(object, selectable);
+  }
+
+  public hideObject(object: THREE.Object3D): void {
+    this.renderingEngine.hideObject(object);
+  }
+
+  public showObject(object: THREE.Object3D): void {
+    this.renderingEngine.showObject(object);
+  }
+
+  public toggleObjectVisibility(object: THREE.Object3D): void {
+    this.renderingEngine.toggleObjectVisibility(object);
+  }
+
+  public getAllSelectableObjects(): THREE.Object3D[] {
+    return this.renderingEngine.getAllSelectableObjects();
+  }
+
+  public selectNextObject(): void {
+    this.renderingEngine.selectNextObject();
+  }
+
+  public selectPreviousObject(): void {
+    this.renderingEngine.selectPreviousObject();
+  }
+
   // Helper methods
   private addGridHelper(): void {
     const gridHelper = new (require('three').GridHelper)(50, 50);
+    gridHelper.name = 'GridHelper';
+    gridHelper.userData.selectable = false; // Mark as non-selectable
+    gridHelper.userData.isHelper = true;
     this.renderingEngine.addObject(gridHelper);
   }
 
   private addAxesHelper(): void {
-    const axesHelper = new (require('three').AxesHelper)(5);
+    const axesHelper = new THREE.AxesHelper(5);
+    axesHelper.name = 'AxesHelper';
+    axesHelper.userData.selectable = false; // Mark as non-selectable
+    axesHelper.userData.isHelper = true;
     this.renderingEngine.addObject(axesHelper);
+  }
+
+  private addDefaultTestObjects(): void {
+    console.log('🧊 Creating test cube...');
+    // Add a default cube for testing
+    const cubeGeometry = new THREE.BoxGeometry(2, 2, 2);
+    const cubeMaterial = new THREE.MeshStandardMaterial({ 
+      color: 0x00ff00,
+      roughness: 0.4,
+      metalness: 0.0
+    });
+    const cube = new THREE.Mesh(cubeGeometry, cubeMaterial);
+    cube.position.set(0, 1, 0);
+    cube.castShadow = true;
+    cube.receiveShadow = true;
+    cube.name = 'TestCube';
+    this.renderingEngine.addObject(cube);
+    console.log('✅ Added test cube at position:', cube.position.toArray());
+
+    console.log('🟩 Creating ground plane...');
+    // Add a plane for shadows
+    const planeGeometry = new THREE.PlaneGeometry(20, 20);
+    const planeMaterial = new THREE.MeshStandardMaterial({ 
+      color: 0x808080,
+      roughness: 0.8,
+      metalness: 0.0
+    });
+    const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+    plane.rotation.x = -Math.PI / 2;
+    plane.receiveShadow = true;
+    plane.name = 'GroundPlane';
+    this.renderingEngine.addObject(plane);
+    console.log('✅ Added ground plane at position:', plane.position.toArray());
+
+    console.log('🔴 Creating test sphere...');
+    // Add a sphere for variety
+    const sphereGeometry = new THREE.SphereGeometry(1, 32, 32);
+    const sphereMaterial = new THREE.MeshStandardMaterial({ 
+      color: 0xff0000,
+      roughness: 0.2,
+      metalness: 0.8
+    });
+    const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+    sphere.position.set(3, 1, 0);
+    sphere.castShadow = true;
+    sphere.receiveShadow = true;
+    sphere.name = 'TestSphere';
+    this.renderingEngine.addObject(sphere);
+    console.log('✅ Added test sphere at position:', sphere.position.toArray());
   }
 }
 

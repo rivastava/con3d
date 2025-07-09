@@ -11,6 +11,8 @@ import { CameraManager } from './CameraManager';
 import { PrimitiveManager } from './PrimitiveManager';
 import { ObjectSettingsManager } from './ObjectSettingsManager';
 import { EnhancedRenderingManager } from './EnhancedRenderingManager';
+import { SceneTransformControls } from './SceneTransformControls';
+import { NonInterferingTransformControls } from './NonInterferingTransformControls';
 
 export class RenderingEngine {
   public renderer: THREE.WebGLRenderer;
@@ -30,6 +32,8 @@ export class RenderingEngine {
   private primitiveManager: PrimitiveManager;
   private objectSettingsManager: ObjectSettingsManager;
   private enhancedRenderingManager: EnhancedRenderingManager;
+  private sceneTransformControls: SceneTransformControls;
+  private nonInterferingTransformControls: NonInterferingTransformControls | null = null;
 
   // Selection system
   private raycaster: THREE.Raycaster;
@@ -90,6 +94,34 @@ export class RenderingEngine {
       
       // Setup mouse events for selection
       this.setupMouseEvents();
+      
+      // Initialize transform controls after everything else is set up
+      // DISABLED: Old transform controls are causing rendering issues
+      // TODO: Remove old transform controls once new ones are fully tested
+      console.log('⚠️ Old transform controls temporarily disabled to prevent rendering issues');
+      // Create a dummy transform controls to avoid null reference errors
+      this.sceneTransformControls = {
+        attachToMesh: () => {},
+        setEnabled: () => {},
+        setMode: () => {},
+        dispose: () => {}
+      } as any;
+
+      // Initialize new non-interfering transform controls (disabled by default)
+      console.log('🎮 Initializing new non-interfering transform controls...');
+      try {
+        this.nonInterferingTransformControls = new NonInterferingTransformControls(
+          this.scene,
+          this.camera,
+          this.renderer,
+          this.controls,
+          { enabled: false } // Start disabled to avoid any issues
+        );
+        console.log('✅ Non-interfering transform controls created (disabled)');
+      } catch (error) {
+        console.warn('⚠️ Failed to create non-interfering transform controls:', error);
+        this.nonInterferingTransformControls = null;
+      }
       
       // Start render loop
       this.startRenderLoop();
@@ -289,8 +321,30 @@ export class RenderingEngine {
     // Stop render loop
     this.stopRenderLoop();
     
+    // Remove event listeners
+    document.removeEventListener('keydown', this.onKeyDown.bind(this));
+    
     // Dispose outline manager
     this.outlineManager.dispose();
+    
+    // Dispose transform controls (if they exist and have dispose method)
+    try {
+      if (this.sceneTransformControls && typeof this.sceneTransformControls.dispose === 'function') {
+        this.sceneTransformControls.dispose();
+      }
+    } catch (error) {
+      console.warn('Failed to dispose legacy transform controls:', error);
+    }
+
+    // Dispose new non-interfering transform controls
+    try {
+      if (this.nonInterferingTransformControls) {
+        this.nonInterferingTransformControls.dispose();
+        this.nonInterferingTransformControls = null;
+      }
+    } catch (error) {
+      console.warn('Failed to dispose non-interfering transform controls:', error);
+    }
     
     // Dispose controls
     this.controls.dispose();
@@ -317,6 +371,32 @@ export class RenderingEngine {
   // Selection methods
   private setupMouseEvents(): void {
     this.container.addEventListener('click', this.onMouseClick.bind(this));
+    
+    // Add keyboard event handlers for selection navigation (Blender-style)
+    document.addEventListener('keydown', this.onKeyDown.bind(this));
+  }
+
+  private onKeyDown(event: KeyboardEvent): void {
+    // Only handle if no input element is focused
+    if (document.activeElement?.tagName === 'INPUT' || 
+        document.activeElement?.tagName === 'TEXTAREA') {
+      return;
+    }
+
+    switch (event.key) {
+      case 'Tab':
+        event.preventDefault();
+        if (event.shiftKey) {
+          this.selectPreviousObject();
+        } else {
+          this.selectNextObject();
+        }
+        break;
+      case 'Escape':
+        event.preventDefault();
+        this.setSelectedMesh(null);
+        break;
+    }
   }
 
   private onMouseClick(event: MouseEvent): void {
@@ -327,19 +407,146 @@ export class RenderingEngine {
 
     // Perform raycasting
     this.raycaster.setFromCamera(this.mouse, this.camera);
-    const intersects = this.raycaster.intersectObjects(this.scene.children, true);
+    
+    // Get all selectable objects (like Blender)
+    const selectableObjects = this.getSelectableObjects();
+    const intersects = this.raycaster.intersectObjects(selectableObjects, true);
 
-    // Find the first mesh in the intersects
+    // Find the first selectable object in the intersects
     let newSelectedMesh: THREE.Mesh | null = null;
     for (const intersect of intersects) {
-      if (intersect.object instanceof THREE.Mesh) {
-        newSelectedMesh = intersect.object;
-        break;
+      if (this.isObjectSelectable(intersect.object)) {
+        // Check if this is a light selector
+        if (intersect.object.userData.isLightSelector) {
+          // Select the parent light instead
+          const parentLight = intersect.object.userData.parentLight;
+          if (parentLight) {
+            console.log(`🔆 Selected light: ${parentLight.name || 'Unnamed'} (${parentLight.type})`);
+            // For now, we'll still set selectedMesh to null since we don't have a light selection system
+            // TODO: Implement proper light selection handling
+            newSelectedMesh = null;
+            break;
+          }
+        } else {
+          newSelectedMesh = intersect.object as THREE.Mesh;
+          console.log(`🎯 Selected: ${newSelectedMesh.name || 'Unnamed'} (${newSelectedMesh.type})`);
+          break;
+        }
       }
     }
 
     // Update selection
     this.setSelectedMesh(newSelectedMesh);
+  }
+
+  /**
+   * Get all objects that can be selected (Blender-style filtering)
+   */
+  private getSelectableObjects(): THREE.Object3D[] {
+    const selectableObjects: THREE.Object3D[] = [];
+    
+    this.scene.traverse((object) => {
+      if (this.isObjectSelectable(object)) {
+        selectableObjects.push(object);
+      }
+    });
+    
+    return selectableObjects;
+  }
+
+  /**
+   * Check if an object can be selected (Blender-style rules)
+   */
+  private isObjectSelectable(object: THREE.Object3D): boolean {
+    // Must be visible (or be a light selector which is intentionally invisible but selectable)
+    if (!object.visible && !object.userData.isLightSelector) {
+      return false;
+    }
+
+    // Check if parent hierarchy is visible
+    let parent = object.parent;
+    while (parent && parent !== this.scene) {
+      if (!parent.visible) {
+        return false;
+      }
+      parent = parent.parent;
+    }
+
+    // Light selectors are always selectable
+    if (object.userData.isLightSelector) {
+      return true;
+    }
+
+    // Only allow selection of specific object types
+    const isSelectableType = 
+      object instanceof THREE.Mesh ||
+      object instanceof THREE.Light ||
+      (object instanceof THREE.Group && this.hasSelectableChildren(object));
+
+    if (!isSelectableType) {
+      return false;
+    }
+
+    // Exclude helper objects (like Blender)
+    const excludedTypes = [
+      'GridHelper',
+      'AxesHelper',
+      'ArrowHelper',
+      'BoxHelper',
+      'PlaneHelper',
+      'PointLightHelper',
+      'DirectionalLightHelper',
+      'SpotLightHelper',
+      'HemisphereLightHelper',
+      'CameraHelper'
+    ];
+
+    if (excludedTypes.includes(object.type)) {
+      return false;
+    }
+
+    // Exclude light targets (they're just Object3D positioning helpers)
+    if (object.userData.isLightTarget) {
+      return false;
+    }
+
+    // Exclude unnamed Object3D (usually helpers or targets)
+    if (object.type === 'Object3D' && (!object.name || object.name === '')) {
+      return false;
+    }
+
+    // Exclude objects with specific names or userData flags
+    if (object.userData.selectable === false) {
+      return false;
+    }
+
+    // Exclude transform controls and their children
+    if (object.userData.isTransformControls || 
+        object.name?.includes('TransformControls') ||
+        object.parent?.userData?.isTransformControls) {
+      return false;
+    }
+
+    // Exclude outline and selection helpers
+    if (object.name?.includes('outline') || 
+        object.name?.includes('selection') ||
+        object.userData.isSelectionHelper) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Check if a group has any selectable children
+   */
+  private hasSelectableChildren(group: THREE.Group): boolean {
+    for (const child of group.children) {
+      if (this.isObjectSelectable(child)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   public setSelectedMesh(mesh: THREE.Mesh | null): void {
@@ -353,6 +560,37 @@ export class RenderingEngine {
     // Add selection highlight with Blender-like outline
     if (this.selectedMesh) {
       this.outlineManager.selectMesh(this.selectedMesh);
+      
+      // Automatically attach and enable legacy transform controls (if available)
+      try {
+        if (this.sceneTransformControls && typeof this.sceneTransformControls.attachToMesh === 'function') {
+          this.sceneTransformControls.attachToMesh(this.selectedMesh);
+          this.sceneTransformControls.setEnabled(true);
+        }
+      } catch (error) {
+        console.warn('Failed to attach legacy transform controls:', error);
+      }
+
+      // Attach new non-interfering transform controls (if enabled)
+      if (this.nonInterferingTransformControls?.isEnabled()) {
+        this.nonInterferingTransformControls.attachToMesh(this.selectedMesh);
+        console.log(`🎯 Transform controls attached to: ${this.selectedMesh.name || 'Unnamed mesh'}`);
+      }
+    } else {
+      // Detach legacy transform controls when no mesh is selected
+      try {
+        if (this.sceneTransformControls && typeof this.sceneTransformControls.attachToMesh === 'function') {
+          this.sceneTransformControls.attachToMesh(null);
+          this.sceneTransformControls.setEnabled(false);
+        }
+      } catch (error) {
+        console.warn('Failed to detach legacy transform controls:', error);
+      }
+
+      // Detach new transform controls
+      if (this.nonInterferingTransformControls) {
+        this.nonInterferingTransformControls.detach();
+      }
     }
 
     // Notify callbacks
@@ -484,6 +722,10 @@ export class RenderingEngine {
     return this.enhancedRenderingManager;
   }
 
+  public getSceneTransformControls(): SceneTransformControls {
+    return this.sceneTransformControls;
+  }
+
   // Camera switching
   public switchCamera(camera: THREE.Camera): void {
     this.camera = camera as THREE.PerspectiveCamera;
@@ -494,5 +736,124 @@ export class RenderingEngine {
     
     // Update outline manager camera reference
     (this.outlineManager as any).camera = camera;
+  }
+
+  // Non-interfering transform controls methods
+  public enableTransformControls(): void {
+    if (this.nonInterferingTransformControls) {
+      this.nonInterferingTransformControls.setEnabled(true);
+      console.log('✅ Transform controls enabled');
+    } else {
+      console.warn('⚠️ Transform controls not available');
+    }
+  }
+
+  public disableTransformControls(): void {
+    if (this.nonInterferingTransformControls) {
+      this.nonInterferingTransformControls.setEnabled(false);
+      console.log('⚠️ Transform controls disabled');
+    }
+  }
+
+  public isTransformControlsEnabled(): boolean {
+    return this.nonInterferingTransformControls?.isEnabled() ?? false;
+  }
+
+  public attachTransformControls(mesh: THREE.Mesh | null): void {
+    if (this.nonInterferingTransformControls) {
+      this.nonInterferingTransformControls.attachToMesh(mesh);
+    }
+  }
+
+  public detachTransformControls(): void {
+    if (this.nonInterferingTransformControls) {
+      this.nonInterferingTransformControls.detach();
+    }
+  }
+
+  public setTransformMode(mode: 'translate' | 'rotate' | 'scale'): void {
+    if (this.nonInterferingTransformControls) {
+      this.nonInterferingTransformControls.setMode(mode);
+    }
+  }
+
+  public getTransformMode(): 'translate' | 'rotate' | 'scale' {
+    return this.nonInterferingTransformControls?.getMode() ?? 'translate';
+  }
+
+  public getNonInterferingTransformControls(): NonInterferingTransformControls | null {
+    return this.nonInterferingTransformControls;
+  }
+
+  /**
+   * Set an object as selectable or non-selectable (Blender-style)
+   */
+  public setObjectSelectable(object: THREE.Object3D, selectable: boolean): void {
+    object.userData.selectable = selectable;
+    console.log(`🎯 Object "${object.name || 'Unnamed'}" selectability set to: ${selectable}`);
+  }
+
+  /**
+   * Hide an object from selection and rendering (Blender-style)
+   */
+  public hideObject(object: THREE.Object3D): void {
+    object.visible = false;
+    // If this was the selected object, deselect it
+    if (this.selectedMesh === object) {
+      this.setSelectedMesh(null);
+    }
+    console.log(`👁️ Object "${object.name || 'Unnamed'}" hidden`);
+  }
+
+  /**
+   * Show a hidden object (Blender-style)
+   */
+  public showObject(object: THREE.Object3D): void {
+    object.visible = true;
+    console.log(`👁️ Object "${object.name || 'Unnamed'}" shown`);
+  }
+
+  /**
+   * Toggle object visibility (Blender-style)
+   */
+  public toggleObjectVisibility(object: THREE.Object3D): void {
+    if (object.visible) {
+      this.hideObject(object);
+    } else {
+      this.showObject(object);
+    }
+  }
+
+  /**
+   * Get all selectable objects in the scene (public method)
+   */
+  public getAllSelectableObjects(): THREE.Object3D[] {
+    return this.getSelectableObjects();
+  }
+
+  /**
+   * Select next object in scene (Blender-style Tab navigation)
+   */
+  public selectNextObject(): void {
+    const selectableObjects = this.getSelectableObjects();
+    if (selectableObjects.length === 0) return;
+
+    const currentIndex = this.selectedMesh ? selectableObjects.indexOf(this.selectedMesh) : -1;
+    const nextIndex = (currentIndex + 1) % selectableObjects.length;
+    
+    this.setSelectedMesh(selectableObjects[nextIndex] as THREE.Mesh);
+  }
+
+  /**
+   * Select previous object in scene (Blender-style Shift+Tab navigation)
+   */
+  public selectPreviousObject(): void {
+    const selectableObjects = this.getSelectableObjects();
+    if (selectableObjects.length === 0) return;
+
+    const currentIndex = this.selectedMesh ? selectableObjects.indexOf(this.selectedMesh) : -1;
+    const prevIndex = currentIndex <= 0 ? selectableObjects.length - 1 : currentIndex - 1;
+    
+    this.setSelectedMesh(selectableObjects[prevIndex] as THREE.Mesh);
   }
 }
