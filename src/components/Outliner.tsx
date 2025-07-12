@@ -175,10 +175,79 @@ export const Outliner: React.FC<OutlinerProps> = ({
   };
 
   const selectObject = (item: SceneItem) => {
+    console.log('Outliner: Selecting object', item.name, item.type);
+    
     if (item.object instanceof THREE.Mesh) {
       onMeshSelect?.(item.object);
+      
+      // Auto-focus camera on small objects
+      try {
+        const box = new THREE.Box3().setFromObject(item.object);
+        const size = box.getSize(new THREE.Vector3());
+        const maxDimension = Math.max(size.x, size.y, size.z);
+        
+        // If object is small, auto-focus the camera
+        if (maxDimension < 1.0) {
+          configurator.focusCameraOnObject(item.object);
+        }
+      } catch (error) {
+        console.warn('Could not auto-focus on object:', error);
+      }
+      
+      // Also trigger the rendering engine's selection system
+      try {
+        const renderingEngine = configurator.getRenderingEngine();
+        if (renderingEngine && typeof (renderingEngine as any).setSelectedMesh === 'function') {
+          (renderingEngine as any).setSelectedMesh(item.object);
+        }
+        
+        // Also try to trigger the configurator's mesh selection event system
+        if (configurator && typeof (configurator as any).onMeshSelected === 'function') {
+          // This should trigger the same event system that mesh clicking uses
+          const meshSelectedCallback = (configurator as any).meshSelectedCallback;
+          if (meshSelectedCallback) {
+            meshSelectedCallback(item.object);
+          }
+        }
+      } catch (error) {
+        console.warn('Could not trigger selection systems:', error);
+      }
+      
+    } else if (item.object instanceof THREE.Light) {
+      // Handle light selection
+      onMeshSelect?.(null); // Clear mesh selection
+      
+      console.log('Selected light:', item.name);
+      
+      // Auto-focus camera on light
+      try {
+        configurator.focusCameraOnObject(item.object, 2.0); // 2 meter distance for lights
+      } catch (error) {
+        console.warn('Could not auto-focus on light:', error);
+      }
+      
+      // Clear mesh selection in rendering engine
+      try {
+        const renderingEngine = configurator.getRenderingEngine();
+        if (renderingEngine && typeof (renderingEngine as any).setSelectedMesh === 'function') {
+          (renderingEngine as any).setSelectedMesh(null);
+        }
+      } catch (error) {
+        console.warn('Could not clear selection in rendering engine:', error);
+      }
+      
     } else {
       onMeshSelect?.(null);
+      
+      // Clear mesh selection in rendering engine
+      try {
+        const renderingEngine = configurator.getRenderingEngine();
+        if (renderingEngine && typeof (renderingEngine as any).setSelectedMesh === 'function') {
+          (renderingEngine as any).setSelectedMesh(null);
+        }
+      } catch (error) {
+        console.warn('Could not clear selection in rendering engine:', error);
+      }
     }
   };
 

@@ -90,6 +90,29 @@ export const CameraControls: React.FC<CameraControlsProps> = ({ configurator }) 
       
       // Use the proper camera switching method
       configurator.switchCamera(newCamera);
+      
+      // Force viewport update by updating the renderer and controls
+      const renderer = configurator.getRenderer();
+      const controls = configurator.getControls();
+      
+      // Update camera aspect ratio to current canvas size
+      const canvas = renderer.domElement;
+      if (newCamera instanceof THREE.PerspectiveCamera) {
+        newCamera.aspect = canvas.clientWidth / canvas.clientHeight;
+        newCamera.updateProjectionMatrix();
+      }
+      
+      // Update controls to use the new camera
+      if (controls) {
+        // Safely cast the camera type for controls
+        if (newCamera instanceof THREE.PerspectiveCamera || newCamera instanceof THREE.OrthographicCamera) {
+          (controls as any).object = newCamera;
+          controls.update();
+        }
+      }
+      
+      // Force a render
+      renderer.render(configurator.getScene(), newCamera);
     }
   };
 
@@ -153,8 +176,11 @@ export const CameraControls: React.FC<CameraControlsProps> = ({ configurator }) 
 
   const updateCameraFocusDistance = (distance: number) => {
     console.log('CameraControls: updateCameraFocusDistance called with:', distance);
+    // Convert UI units (which are in meters) to proper focus distance
+    const focusDistanceInMeters = Math.max(0.1, distance);
+    
     // Update post-processing DOF focus distance with physical calculation
-    updatePhysicalDOF(advancedSettings.focalLength, advancedSettings.aperture, distance);
+    updatePhysicalDOF(advancedSettings.focalLength, advancedSettings.aperture, focusDistanceInMeters);
   };
 
   const toggleDepthOfField = (enabled: boolean) => {
@@ -279,22 +305,38 @@ export const CameraControls: React.FC<CameraControlsProps> = ({ configurator }) 
     const targetObject = focusableObjects.find(obj => obj.name === objectName);
     
     if (targetObject) {
-      const newFocusDistance = targetObject.distance;
+      const camera = configurator.getRenderingEngine().camera;
+      
+      // For small objects, use bounding box to calculate proper focus distance
+      const box = new THREE.Box3().setFromObject(targetObject.object);
+      const size = box.getSize(new THREE.Vector3());
+      const maxDimension = Math.max(size.x, size.y, size.z);
+      
+      // Calculate distance based on object size and camera FOV
+      let targetDistance = targetObject.distance;
+      
+      // For very small objects (< 0.1 units), adjust focus distance
+      if (maxDimension < 0.1) {
+        // Use center-to-surface distance for small objects
+        const center = box.getCenter(new THREE.Vector3());
+        const surfaceDistance = camera.position.distanceTo(center) + (maxDimension * 0.5);
+        targetDistance = Math.max(0.05, surfaceDistance); // Minimum 5cm focus distance
+      }
       
       // Calculate physically accurate DOF
-      const coc = calculateCircleOfConfusion(advancedSettings.focalLength, advancedSettings.aperture, newFocusDistance);
+      const coc = calculateCircleOfConfusion(advancedSettings.focalLength, advancedSettings.aperture, targetDistance);
       
       setAdvancedSettings(prev => ({
         ...prev,
-        focusDistance: newFocusDistance,
+        focusDistance: targetDistance,
         selectedFocusObject: objectName,
         focusTarget: 'object',
         circleOfConfusion: coc
       }));
       
       // Update post-processing with physically calculated values
-      updateCameraFocusDistance(newFocusDistance);
-      updatePhysicalDOF(advancedSettings.focalLength, advancedSettings.aperture, newFocusDistance);
+      updateCameraFocusDistance(targetDistance);
+      updatePhysicalDOF(advancedSettings.focalLength, advancedSettings.aperture, targetDistance);
     }
   };
 
@@ -478,7 +520,7 @@ export const CameraControls: React.FC<CameraControlsProps> = ({ configurator }) 
             {/* Focal Length */}
             <div>
               <label className="block text-sm font-medium mb-1">
-                Focal Length: {advancedSettings.focalLength.toFixed(1)}mm
+                Focal Length: {advancedSettings.focalLength.toFixed(1)}mm ({(advancedSettings.focalLength / 10).toFixed(2)}cm)
               </label>
               <input
                 type="range"
@@ -493,6 +535,9 @@ export const CameraControls: React.FC<CameraControlsProps> = ({ configurator }) 
                 }}
                 className="w-full"
               />
+              <div className="text-xs text-gray-400 mt-1">
+                Range: 14mm (1.4cm) - 200mm (20cm) • Professional camera focal lengths
+              </div>
             </div>
             
             {/* Aperture */}
@@ -553,7 +598,7 @@ export const CameraControls: React.FC<CameraControlsProps> = ({ configurator }) 
                     <option value="">Select an object...</option>
                     {getFocusableObjects().map((obj) => (
                       <option key={obj.name} value={obj.name}>
-                        {obj.name} ({obj.distance.toFixed(1)}m)
+                        {obj.name} ({(obj.distance * 100).toFixed(0)}cm)
                       </option>
                     ))}
                   </select>
@@ -564,7 +609,7 @@ export const CameraControls: React.FC<CameraControlsProps> = ({ configurator }) 
             {/* Focus Distance */}
             <div>
               <label className="block text-sm font-medium mb-1">
-                Focus Distance: {advancedSettings.focusDistance.toFixed(1)}m
+                Focus Distance: {(advancedSettings.focusDistance * 100).toFixed(0)}cm
                 {advancedSettings.focusTarget !== 'manual' && (
                   <span className="text-xs text-gray-400 ml-2">
                     (Auto from {advancedSettings.focusTarget})
@@ -573,22 +618,26 @@ export const CameraControls: React.FC<CameraControlsProps> = ({ configurator }) 
               </label>
               <input
                 type="range"
-                min="0.1"
-                max="100"
-                step="0.1"
-                value={advancedSettings.focusDistance}
+                min="5"
+                max="10000"
+                step="5"
+                value={advancedSettings.focusDistance * 100}
                 disabled={advancedSettings.focusTarget !== 'manual'}
                 onChange={(e) => {
-                  const newFocusDistance = parseFloat(e.target.value);
+                  const newFocusDistanceCm = parseFloat(e.target.value);
+                  const newFocusDistanceM = newFocusDistanceCm / 100;
                   setAdvancedSettings(prev => ({ 
                     ...prev, 
-                    focusDistance: newFocusDistance,
+                    focusDistance: newFocusDistanceM,
                     focusTarget: 'manual' 
                   }));
-                  updateCameraFocusDistance(newFocusDistance);
+                  updateCameraFocusDistance(newFocusDistanceM);
                 }}
                 className={`w-full ${advancedSettings.focusTarget !== 'manual' ? 'opacity-50 cursor-not-allowed' : ''}`}
               />
+              <div className="text-xs text-gray-400 mt-1">
+                Range: 5cm - 100m • Professional camera focus distances
+              </div>
             </div>
             
             {/* Depth of Field Toggle */}

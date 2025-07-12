@@ -119,10 +119,40 @@ export class OutlineManager {
       outlineMesh.matrix.copy(mesh.matrix);
       outlineMesh.matrixAutoUpdate = false;
       
-      // Scale slightly larger for outline effect
-      const scale = new THREE.Vector3();
-      mesh.getWorldScale(scale);
-      const outlineScale = Math.max(scale.x, scale.y, scale.z) * (this.outlineThickness * 0.01) + 1.001;
+      // Calculate proper bounding box for the mesh geometry
+      const boundingBox = new THREE.Box3();
+      
+      // For groups or complex hierarchies, calculate actual mesh bounds
+      if (mesh.parent && mesh.parent.type === 'Group') {
+        // Calculate bounding box from geometry directly
+        boundingBox.setFromObject(mesh);
+      } else {
+        // For individual meshes, use geometry bounds
+        if (mesh.geometry.boundingBox) {
+          boundingBox.copy(mesh.geometry.boundingBox);
+        } else {
+          mesh.geometry.computeBoundingBox();
+          boundingBox.copy(mesh.geometry.boundingBox!);
+        }
+      }
+      
+      // Calculate appropriate outline thickness based on actual mesh size
+      const size = boundingBox.getSize(new THREE.Vector3());
+      const maxDimension = Math.max(size.x, size.y, size.z);
+      
+      // Scale outline based on mesh size, not world scale
+      let outlineScale = 1.0;
+      if (maxDimension > 0) {
+        // For very small objects, use a smaller outline scale
+        if (maxDimension < 0.1) {
+          outlineScale = 1.02; // 2% larger for tiny objects
+        } else if (maxDimension < 1.0) {
+          outlineScale = 1.01; // 1% larger for small objects  
+        } else {
+          outlineScale = 1.005; // 0.5% larger for normal objects
+        }
+      }
+      
       outlineMesh.scale.setScalar(outlineScale);
       
       // Store reference for cleanup

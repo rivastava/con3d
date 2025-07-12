@@ -55,14 +55,39 @@ export const SceneControls: React.FC<SceneControlsProps> = ({ configurator }) =>
 
   const handleToneMappingChange = (newToneMapping: THREE.ToneMapping) => {
     setToneMapping(newToneMapping);
+    
+    // Use enhanced rendering manager for consistent tone mapping
+    const enhancedRendering = configurator.getEnhancedRenderingManager();
+    enhancedRendering.setToneMapping(newToneMapping, exposure);
+    
+    // Legacy renderer access for compatibility
     const renderer = configurator.getRenderer();
     renderer.toneMapping = newToneMapping;
+    
+    // Some tone mapping algorithms need specific settings
+    if (newToneMapping === THREE.ACESFilmicToneMapping) {
+      // ACES works best with linear color space
+      renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+    } else if (newToneMapping === THREE.AgXToneMapping || newToneMapping === THREE.NeutralToneMapping) {
+      // Modern tone mappers work with sRGB output
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+    }
+    
+    console.log('🎨 Tone mapping changed to:', newToneMapping, 'with exposure:', exposure);
   };
 
   const handleExposureChange = (newExposure: number) => {
     setExposure(newExposure);
+    
+    // Use enhanced rendering manager for consistent exposure
+    const enhancedRendering = configurator.getEnhancedRenderingManager();
+    enhancedRendering.setToneMapping(toneMapping, newExposure);
+    
+    // Legacy renderer access for compatibility
     const renderer = configurator.getRenderer();
     renderer.toneMappingExposure = newExposure;
+    
+    console.log('💡 Exposure changed to:', newExposure);
   };
 
   const handleModelUpload = useCallback(async (file: File) => {
@@ -402,29 +427,6 @@ export const SceneControls: React.FC<SceneControlsProps> = ({ configurator }) =>
           >
             Clear Environment
           </button>
-          
-          {/* HDRI Background Visibility Toggle */}
-          <div className="flex items-center justify-between p-3 bg-gray-800 rounded-lg border border-gray-700">
-            <div>
-              <label className="block text-sm font-medium mb-1">HDRI Background</label>
-              <p className="text-xs text-gray-400">Hide background but keep lighting</p>
-            </div>
-            <label className="flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={backgroundVisible}
-                onChange={handleBackgroundVisibilityToggle}
-                className="sr-only"
-              />
-              <div className={`relative w-12 h-6 rounded-full transition-colors ${
-                backgroundVisible ? 'bg-blue-600' : 'bg-gray-600'
-              }`}>
-                <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
-                  backgroundVisible ? 'translate-x-6' : 'translate-x-0'
-                }`} />
-              </div>
-            </label>
-          </div>
         </div>
       </div>
 
@@ -459,22 +461,6 @@ export const SceneControls: React.FC<SceneControlsProps> = ({ configurator }) =>
               Normal
             </button>
           </div>
-        </div>
-      </div>
-
-      {/* Background Visibility */}
-      <div>
-        <h4 className="text-md font-medium mb-3">Background</h4>
-        <div className="flex items-center">
-          <input
-            type="checkbox"
-            checked={backgroundVisible}
-            onChange={handleBackgroundVisibilityToggle}
-            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-          />
-          <span className="ml-2 text-sm">
-            {backgroundVisible ? 'Hide' : 'Show'} Background
-          </span>
         </div>
       </div>
 
@@ -540,10 +526,34 @@ export const SceneControls: React.FC<SceneControlsProps> = ({ configurator }) =>
         )}
       </div>
 
-      {/* Background Manager Controls */}
+      {/* Background Controls */}
       <div>
-        <h4 className="text-md font-medium mb-3">Background Manager</h4>
+        <h4 className="text-md font-medium mb-3">Background</h4>
         <div className="space-y-3">
+          {/* Background Visibility Toggle */}
+          <div className="flex items-center justify-between p-3 bg-gray-800 rounded-lg border border-gray-700">
+            <div>
+              <label className="block text-sm font-medium mb-1">Background Visible</label>
+              <p className="text-xs text-gray-400">Hide background but keep environment lighting</p>
+            </div>
+            <label className="flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={backgroundVisible}
+                onChange={handleBackgroundVisibilityToggle}
+                className="sr-only"
+              />
+              <div className={`relative w-12 h-6 rounded-full transition-colors ${
+                backgroundVisible ? 'bg-blue-600' : 'bg-gray-600'
+              }`}>
+                <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
+                  backgroundVisible ? 'translate-x-6' : 'translate-x-0'
+                }`} />
+              </div>
+            </label>
+          </div>
+          
+          {/* Background Type Selection */}
           <div>
             <label className="block text-sm mb-2">Background Type</label>
             <select

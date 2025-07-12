@@ -27,11 +27,11 @@ export class LightingManager {
       visible: true
     });
 
-    console.log('☀️ Adding default main directional light...');
+    console.log('☀️ Adding default directional light...');
     // Main directional light
     this.addLight({
-      id: 'default-main',
-      name: 'Main Light',
+      id: 'default-directional',
+      name: 'Directional Light',
       type: 'directional',
       parameters: {
         color: 0xffffff,
@@ -52,17 +52,39 @@ export class LightingManager {
       visible: true
     });
 
-    console.log('💡 Adding default fill light...');
-    // Fill light
+    console.log('💡 Adding default point light...');
+    // Point light
     this.addLight({
-      id: 'default-fill',
-      name: 'Fill Light',
-      type: 'directional',
+      id: 'default-point',
+      name: 'Point Light',
+      type: 'point',
       parameters: {
         color: 0xffffff,
-        intensity: 0.3,
-        position: [-5, 5, 10],
-        target: [0, 0, 0]
+        intensity: 0.8,
+        position: [5, 8, 5],
+        distance: 100,
+        decay: 2,
+        castShadow: true
+      },
+      visible: true
+    });
+
+    console.log('🔦 Adding default spot light...');
+    // Spot light
+    this.addLight({
+      id: 'default-spot',
+      name: 'Spot Light',
+      type: 'spot',
+      parameters: {
+        color: 0xffffff,
+        intensity: 0.6,
+        position: [-5, 10, 8],
+        target: [0, 0, 0],
+        angle: Math.PI / 6,
+        penumbra: 0.2,
+        distance: 100,
+        decay: 2,
+        castShadow: true
       },
       visible: true
     });

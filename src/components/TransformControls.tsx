@@ -15,6 +15,7 @@ export const TransformControls: React.FC<TransformControlsProps> = ({ configurat
   const [scale, setScale] = useState({ x: 1, y: 1, z: 1 });
   const [use3DGizmo, setUse3DGizmo] = useState(false);
   const [sceneTransformControls, setSceneTransformControls] = useState<SceneTransformControls | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
 
   // Initialize 3D transform controls
   useEffect(() => {
@@ -92,11 +93,14 @@ export const TransformControls: React.FC<TransformControlsProps> = ({ configurat
         y: selectedMesh.scale.y,
         z: selectedMesh.scale.z
       });
+      setIsInitialized(true);
+    } else {
+      setIsInitialized(false);
     }
   }, [selectedMesh]);
 
   const updatePosition = useCallback((axis: 'x' | 'y' | 'z', value: number) => {
-    if (!selectedMesh) return;
+    if (!selectedMesh || !isInitialized) return;
     
     const newPosition = { ...position, [axis]: value };
     setPosition(newPosition);
@@ -107,10 +111,10 @@ export const TransformControls: React.FC<TransformControlsProps> = ({ configurat
         selectedMesh.position[axis] = value;
       }
     }, 0);
-  }, [selectedMesh, position]);
+  }, [selectedMesh, position, isInitialized]);
 
   const updateRotation = useCallback((axis: 'x' | 'y' | 'z', value: number) => {
-    if (!selectedMesh) return;
+    if (!selectedMesh || !isInitialized) return;
     
     const newRotation = { ...rotation, [axis]: value };
     setRotation(newRotation);
@@ -121,10 +125,10 @@ export const TransformControls: React.FC<TransformControlsProps> = ({ configurat
         selectedMesh.rotation[axis] = value * (Math.PI / 180); // Convert to radians
       }
     }, 0);
-  }, [selectedMesh, rotation]);
+  }, [selectedMesh, rotation, isInitialized]);
 
   const updateScale = useCallback((axis: 'x' | 'y' | 'z', value: number) => {
-    if (!selectedMesh) return;
+    if (!selectedMesh || !isInitialized) return;
     
     const newScale = { ...scale, [axis]: value };
     setScale(newScale);
@@ -135,10 +139,10 @@ export const TransformControls: React.FC<TransformControlsProps> = ({ configurat
         selectedMesh.scale[axis] = value;
       }
     }, 0);
-  }, [selectedMesh, scale]);
+  }, [selectedMesh, scale, isInitialized]);
 
   const resetTransform = useCallback(() => {
-    if (!selectedMesh) return;
+    if (!selectedMesh || !isInitialized) return;
     
     // Schedule Three.js mutations for next tick to avoid render cycle side effects
     setTimeout(() => {
@@ -152,7 +156,7 @@ export const TransformControls: React.FC<TransformControlsProps> = ({ configurat
     setPosition({ x: 0, y: 0, z: 0 });
     setRotation({ x: 0, y: 0, z: 0 });
     setScale({ x: 1, y: 1, z: 1 });
-  }, [selectedMesh]);
+  }, [selectedMesh, isInitialized]);
 
   const duplicateMesh = useCallback(() => {
     if (!selectedMesh) return;

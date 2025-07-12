@@ -59,6 +59,33 @@ export class RenderingEngine {
       // Initialize camera manager first to get the proper camera
       this.cameraManager = new CameraManager(this.scene, this.renderer);
       
+      // Set up camera switching callback
+      this.cameraManager.onCameraSwitch((camera, config) => {
+        console.log('🎥 Camera switching callback triggered:', config.name);
+        this.camera = camera as THREE.PerspectiveCamera;
+        
+        // Update controls
+        if (this.controls) {
+          (this.controls as any).object = camera;
+          this.controls.update();
+        }
+        
+        // Update outline manager
+        if (this.outlineManager) {
+          (this.outlineManager as any).camera = camera;
+        }
+        
+        // Update post-processing if available
+        if (this.enhancedRenderingManager) {
+          const postProcessing = this.enhancedRenderingManager.getPostProcessingManager();
+          if (postProcessing) {
+            postProcessing.updateCamera(camera);
+          }
+        }
+        
+        console.log('✅ Camera switching complete');
+      });
+      
       // Use the active camera from camera manager
       this.camera = this.cameraManager.getActiveCamera() as THREE.PerspectiveCamera;
       
@@ -728,14 +755,54 @@ export class RenderingEngine {
 
   // Camera switching
   public switchCamera(camera: THREE.Camera): void {
+    console.log('🎥 RenderingEngine: switchCamera called for:', camera.name || camera.type);
+    
     this.camera = camera as THREE.PerspectiveCamera;
     
-    // Update controls
-    (this.controls as any).object = camera;
-    this.controls.update();
+    // Update camera aspect ratio for proper rendering
+    if (camera instanceof THREE.PerspectiveCamera) {
+      camera.aspect = this.renderer.domElement.clientWidth / this.renderer.domElement.clientHeight;
+      camera.updateProjectionMatrix();
+    } else if (camera instanceof THREE.OrthographicCamera) {
+      const aspect = this.renderer.domElement.clientWidth / this.renderer.domElement.clientHeight;
+      const frustumSize = 10;
+      camera.left = frustumSize * aspect / -2;
+      camera.right = frustumSize * aspect / 2;
+      camera.top = frustumSize / 2;
+      camera.bottom = frustumSize / -2;
+      camera.updateProjectionMatrix();
+    }
+    
+    // Update controls object reference
+    if (this.controls) {
+      (this.controls as any).object = camera;
+      this.controls.update();
+      
+      // For OrbitControls, ensure target is properly maintained
+      if ('target' in this.controls && camera.position) {
+        // Calculate direction from camera and maintain a reasonable target distance
+        const direction = new THREE.Vector3();
+        camera.getWorldDirection(direction);
+        const targetDistance = 5; // Default target distance
+        (this.controls as any).target.copy(camera.position).add(direction.multiplyScalar(targetDistance));
+        this.controls.update();
+      }
+    }
     
     // Update outline manager camera reference
-    (this.outlineManager as any).camera = camera;
+    if (this.outlineManager) {
+      (this.outlineManager as any).camera = camera;
+    }
+    
+    // Update post-processing camera
+    if (this.enhancedRenderingManager) {
+      const postProcessing = this.enhancedRenderingManager.getPostProcessingManager();
+      if (postProcessing) {
+        postProcessing.updateCamera(camera);
+      }
+    }
+    
+    console.log('✅ RenderingEngine: Camera switched successfully');
   }
 
   // Non-interfering transform controls methods

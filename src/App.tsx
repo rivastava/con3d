@@ -287,9 +287,9 @@ function App() {
         <DiagnosticPanel />
       </div>
 
-      {/* Right Sidebar - Scene Controls */}
+      {/* Right Sidebar - Scene Controls - Made 1.7x wider */}
       {!isFullscreen && (
-        <div className="w-80 bg-gray-900 border-l border-gray-700 flex flex-col">
+        <div className="w-96 bg-gray-900 border-l border-gray-700 flex flex-col" style={{ width: '27rem' }}>
           <DualSidebar
             configurator={configuratorRef.current || undefined}
             selectedMesh={selectedMesh}

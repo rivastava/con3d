@@ -40,6 +40,10 @@ export interface RenderQualitySettings {
     ssaoRadius: number;
     ssaoIntensity: number;
     enableGI: boolean; // Simplified GI approximation
+    enableEnvironmentLighting: boolean;
+    environmentIntensity: number;
+    enableIndirectLighting: boolean;
+    indirectLightingIntensity: number;
   };
   
   // Reflections and Refractions
@@ -90,6 +94,8 @@ export class EnhancedRenderingManager {
   // Advanced lighting
   private ambientLight?: THREE.AmbientLight;
   private hemisphereLight?: THREE.HemisphereLight;
+  private environmentMap?: THREE.Texture;
+  private lightProbes: THREE.LightProbe[] = [];
   private advancedLightingSystem: AdvancedLightingSystem;
   
   constructor(renderer: THREE.WebGLRenderer, scene: THREE.Scene) {
@@ -140,6 +146,10 @@ export class EnhancedRenderingManager {
         ssaoRadius: 0.1,
         ssaoIntensity: 0.5,
         enableGI: true,
+        enableEnvironmentLighting: true,
+        environmentIntensity: 1.0,
+        enableIndirectLighting: true,
+        indirectLightingIntensity: 0.5,
       },
       reflections: {
         enableScreenSpaceReflections: false, // Performance intensive
@@ -214,6 +224,76 @@ export class EnhancedRenderingManager {
     );
     this.hemisphereLight.position.set(0, 50, 0);
     this.scene.add(this.hemisphereLight);
+    
+    // Initialize environment lighting if enabled
+    this.setupEnvironmentLighting();
+    
+    // Setup light probes for indirect lighting
+    this.setupLightProbes();
+  }
+  
+  /**
+   * Setup environment lighting for Image-Based Lighting (IBL)
+   */
+  private setupEnvironmentLighting(): void {
+    if (!this.settings.globalIllumination.enableEnvironmentLighting) return;
+    
+    // Create a simple procedural environment map if none exists
+    if (!this.scene.environment) {
+      const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
+      pmremGenerator.compileEquirectangularShader();
+      
+      // Create a simple gradient environment
+      const size = 256;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const context = canvas.getContext('2d')!;
+      
+      // Create gradient from blue sky to brownish ground
+      const gradient = context.createLinearGradient(0, 0, 0, size);
+      gradient.addColorStop(0, '#87ceeb'); // Sky blue
+      gradient.addColorStop(1, '#443333'); // Ground brown
+      
+      context.fillStyle = gradient;
+      context.fillRect(0, 0, size, size);
+      
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.mapping = THREE.EquirectangularReflectionMapping;
+      
+      this.environmentMap = pmremGenerator.fromEquirectangular(texture).texture;
+      this.scene.environment = this.environmentMap;
+      texture.dispose();
+      pmremGenerator.dispose();
+    }
+  }
+  
+  /**
+   * Setup light probes for indirect lighting
+   */
+  private setupLightProbes(): void {
+    if (!this.settings.globalIllumination.enableIndirectLighting) return;
+    
+    // Clear existing light probes
+    this.lightProbes.forEach(probe => this.scene.remove(probe));
+    this.lightProbes = [];
+    
+    // Create a simple light probe setup
+    const probeIntensity = this.settings.globalIllumination.indirectLightingIntensity;
+    
+    // Central light probe
+    const centralProbe = new THREE.LightProbe();
+    centralProbe.sh.fromArray([
+      // Red
+      probeIntensity * 0.5, 0, 0, 0, 0, 0, 0, 0, 0,
+      // Green  
+      0, probeIntensity * 0.5, 0, 0, 0, 0, 0, 0, 0,
+      // Blue
+      0, 0, probeIntensity * 0.5, 0, 0, 0, 0, 0, 0
+    ]);
+    
+    this.scene.add(centralProbe);
+    this.lightProbes.push(centralProbe);
   }
   
   /**
@@ -268,6 +348,7 @@ export class EnhancedRenderingManager {
     this.applyShadowSettings();
     this.applyToneMappingSettings();
     this.applyPerformanceSettings();
+    this.applyGlobalIlluminationSettings();
     this.initializeAdvancedLighting();
   }
   
@@ -299,8 +380,39 @@ export class EnhancedRenderingManager {
   private applyToneMappingSettings(): void {
     const settings = this.settings.toneMappingAndColor;
     
-    this.renderer.toneMapping = settings.toneMapping;
-    this.renderer.toneMappingExposure = settings.exposure;
+    // Only apply if tone mapping hasn't been externally set
+    // Check if current renderer settings differ from our defaults
+    if (this.renderer.toneMapping === THREE.ACESFilmicToneMapping && 
+        Math.abs(this.renderer.toneMappingExposure - 1.0) < 0.01) {
+      // Apply our settings since they appear to be defaults
+      this.renderer.toneMapping = settings.toneMapping;
+      this.renderer.toneMappingExposure = settings.exposure;
+    }
+    // Otherwise, respect external tone mapping settings
+  }
+  
+  /**
+   * Update tone mapping settings (for external control)
+   */
+  public setToneMapping(toneMapping: THREE.ToneMapping, exposure?: number): void {
+    this.settings.toneMappingAndColor.toneMapping = toneMapping;
+    if (exposure !== undefined) {
+      this.settings.toneMappingAndColor.exposure = exposure;
+    }
+    this.renderer.toneMapping = toneMapping;
+    if (exposure !== undefined) {
+      this.renderer.toneMappingExposure = exposure;
+    }
+  }
+  
+  /**
+   * Get current tone mapping settings
+   */
+  public getToneMapping(): { toneMapping: THREE.ToneMapping; exposure: number } {
+    return {
+      toneMapping: this.renderer.toneMapping,
+      exposure: this.renderer.toneMappingExposure
+    };
   }
   
   private applyPerformanceSettings(): void {
@@ -314,6 +426,81 @@ export class EnhancedRenderingManager {
         (object.material as any).lights = true;
       }
     });
+  }
+
+  private applyGlobalIlluminationSettings(): void {
+    const settings = this.settings.globalIllumination;
+    
+    // Update ambient light
+    if (this.ambientLight) {
+      this.ambientLight.color = settings.ambientColor;
+      this.ambientLight.intensity = settings.ambientIntensity;
+      this.ambientLight.visible = settings.enableGI;
+    }
+    
+    // Update hemisphere light
+    if (this.hemisphereLight) {
+      this.hemisphereLight.intensity = settings.enableGI ? 0.2 : 0;
+      this.hemisphereLight.visible = settings.enableGI;
+    }
+    
+    // Enable/disable SSAO if available
+    if (this.postProcessingManager && settings.enableSSAO !== undefined) {
+      this.postProcessingManager.updateSettings({
+        enableSSAO: settings.enableSSAO,
+        ssaoIntensity: settings.ssaoIntensity,
+        ssaoRadius: settings.ssaoRadius
+      });
+    }
+    
+    // Update environment lighting
+    if (settings.enableEnvironmentLighting && this.scene.environment) {
+      // Apply environment intensity
+      this.scene.environmentIntensity = settings.environmentIntensity;
+      this.scene.environment.mapping = THREE.EquirectangularReflectionMapping;
+    } else if (!settings.enableEnvironmentLighting) {
+      this.scene.environmentIntensity = 0;
+    }
+    
+    // Update light probes
+    this.lightProbes.forEach(probe => {
+      probe.visible = settings.enableIndirectLighting && settings.enableGI;
+      if (probe.visible) {
+        const intensity = settings.indirectLightingIntensity;
+        probe.sh.fromArray([
+          // Red
+          intensity * 0.5, 0, 0, 0, 0, 0, 0, 0, 0,
+          // Green  
+          0, intensity * 0.5, 0, 0, 0, 0, 0, 0, 0,
+          // Blue
+          0, 0, intensity * 0.5, 0, 0, 0, 0, 0, 0
+        ]);
+      }
+    });
+    
+    // Update all materials to use enhanced lighting when GI is enabled
+    if (settings.enableGI) {
+      this.scene.traverse((object) => {
+        if (object instanceof THREE.Mesh) {
+          const materials = Array.isArray(object.material) ? object.material : [object.material];
+          
+          materials.forEach(material => {
+            if (material instanceof THREE.MeshStandardMaterial || 
+                material instanceof THREE.MeshPhysicalMaterial) {
+              // Enable better material properties for GI
+              material.needsUpdate = true;
+              material.envMapIntensity = settings.enableEnvironmentLighting ? settings.environmentIntensity : 1.0;
+              
+              // Improve material response to indirect lighting
+              if (material instanceof THREE.MeshPhysicalMaterial) {
+                material.clearcoat = Math.min(material.clearcoat + 0.1, 1.0);
+                material.transmission = Math.max(material.transmission - 0.05, 0.0);
+              }
+            }
+          });
+        }
+      });
+    }
   }
   
   /**

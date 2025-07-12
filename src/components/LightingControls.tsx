@@ -10,7 +10,7 @@ interface LightingControlsProps {
 interface LightConfig {
   id: string;
   name: string;
-  type: 'directional' | 'ambient' | 'point' | 'spot';
+  type: 'directional' | 'ambient' | 'point' | 'spot' | 'area';
   light: THREE.Light;
   intensity: number;
   color: string;
@@ -20,6 +20,9 @@ interface LightConfig {
   angle?: number;
   penumbra?: number;
   decay?: number;
+  width?: number;  // For area lights
+  height?: number; // For area lights
+  visible?: boolean; // For toggling light visibility
 }
 
 export const LightingControls: React.FC<LightingControlsProps> = ({ configurator }) => {
@@ -183,6 +186,7 @@ export const LightingControls: React.FC<LightingControlsProps> = ({ configurator
     if (light instanceof THREE.AmbientLight) return 'ambient';
     if (light instanceof THREE.PointLight) return 'point';
     if (light instanceof THREE.SpotLight) return 'spot';
+    if (light instanceof THREE.RectAreaLight) return 'area';
     return 'directional';
   };
 
@@ -232,11 +236,27 @@ export const LightingControls: React.FC<LightingControlsProps> = ({ configurator
         lightConfig.penumbra = 0.1;
         lightConfig.decay = 2;
         break;
+      case 'area':
+        const areaLight = new THREE.RectAreaLight(0xffffff, 1, 4, 4);
+        areaLight.position.set(0, 5, 0);
+        areaLight.lookAt(0, 0, 0);
+        areaLight.name = 'Area Light';
+        light = areaLight;
+        lightConfig.position = { x: 0, y: 5, z: 0 };
+        lightConfig.width = 4;
+        lightConfig.height = 4;
+        break;
       default:
         return;
     }
 
     scene.add(light);
+    
+    // Create visual helper for the light
+    const helper = createLightHelper(light, type);
+    if (helper) {
+      scene.add(helper);
+    }
 
     const newLightConfig: LightConfig = {
       id: light.uuid,
@@ -258,6 +278,22 @@ export const LightingControls: React.FC<LightingControlsProps> = ({ configurator
 
     const scene = configurator.getScene();
     scene.remove(lightConfig.light);
+    
+    // Remove helper if it exists
+    const helper = scene.children.find(child => 
+      child.userData.isLightHelper && child.userData.parentLight === lightConfig.light
+    );
+    if (helper) {
+      scene.remove(helper);
+    }
+    
+    // Remove emissive mesh if it exists (for area lights)
+    const emissiveMesh = scene.children.find(child => 
+      child.userData.isLightEmissive && child.userData.parentLight === lightConfig.light
+    );
+    if (emissiveMesh) {
+      scene.remove(emissiveMesh);
+    }
 
     setLights(prev => prev.filter(l => l.id !== lightId));
     if (selectedLightId === lightId) {
@@ -340,6 +376,122 @@ export const LightingControls: React.FC<LightingControlsProps> = ({ configurator
     }));
   }, [lights]);
 
+  // Helper function to create visible light representation
+  const createLightHelper = useCallback((light: THREE.Light, type: string) => {
+    let helper: THREE.Object3D | null = null;
+    
+    switch (type) {
+      case 'point':
+        // Create visible sphere for point light
+        const pointGeometry = new THREE.SphereGeometry(0.2, 16, 8);
+        const pointMaterial = new THREE.MeshBasicMaterial({ 
+          color: light.color,
+          transparent: true,
+          opacity: 0.7
+        });
+        helper = new THREE.Mesh(pointGeometry, pointMaterial);
+        helper.position.copy(light.position);
+        helper.name = `${light.name}_helper`;
+        helper.userData.isLightHelper = true;
+        helper.userData.parentLight = light;
+        break;
+        
+      case 'area':
+        // Create visible rectangle for area light (RectAreaLight)
+        if (light instanceof THREE.RectAreaLight) {
+          // Create helper geometry
+          const areaGeometry = new THREE.PlaneGeometry(light.width, light.height);
+          const areaMaterial = new THREE.MeshBasicMaterial({ 
+            color: light.color,
+            transparent: true,
+            opacity: 0.5,
+            side: THREE.DoubleSide
+          });
+          helper = new THREE.Mesh(areaGeometry, areaMaterial);
+          helper.position.copy(light.position);
+          helper.rotation.copy(light.rotation);
+          helper.name = `${light.name}_helper`;
+          helper.userData.isLightHelper = true;
+          helper.userData.parentLight = light;
+          
+          // Make the area light physically emissive by adding an emissive mesh
+          const emissiveGeometry = new THREE.PlaneGeometry(light.width, light.height);
+          const emissiveMaterial = new THREE.MeshStandardMaterial({
+            color: light.color,
+            emissive: light.color,
+            emissiveIntensity: Math.min(light.intensity * 0.3, 2.0),
+            transparent: true,
+            opacity: 0.9,
+            side: THREE.DoubleSide
+          });
+          const emissiveMesh = new THREE.Mesh(emissiveGeometry, emissiveMaterial);
+          emissiveMesh.position.copy(light.position);
+          emissiveMesh.rotation.copy(light.rotation);
+          emissiveMesh.name = `${light.name}_emissive`;
+          emissiveMesh.userData.isLightEmissive = true;
+          emissiveMesh.userData.parentLight = light;
+          
+          // Add emissive mesh to scene immediately
+          const scene = configurator.getScene();
+          scene.add(emissiveMesh);
+        }
+        break;
+        
+      case 'spot':
+        // Use Three.js built-in SpotLightHelper
+        helper = new THREE.SpotLightHelper(light as THREE.SpotLight);
+        helper.name = `${light.name}_helper`;
+        helper.userData.isLightHelper = true;
+        helper.userData.parentLight = light;
+        break;
+        
+      case 'directional':
+        // Use Three.js built-in DirectionalLightHelper
+        helper = new THREE.DirectionalLightHelper(light as THREE.DirectionalLight, 1);
+        helper.name = `${light.name}_helper`;
+        helper.userData.isLightHelper = true;
+        helper.userData.parentLight = light;
+        break;
+    }
+    
+    return helper;
+  }, []);
+
+  // Toggle light visibility
+  const toggleLightVisibility = useCallback((lightId: string) => {
+    if (!configurator) return;
+
+    const lightConfig = lights.find(l => l.id === lightId);
+    if (!lightConfig) return;
+    
+    const scene = configurator.getScene();
+    const light = lightConfig.light;
+    
+    // Toggle light visibility
+    light.visible = !light.visible;
+    
+    // Toggle helper visibility
+    const helper = scene.children.find(child => 
+      child.userData.isLightHelper && child.userData.parentLight === light
+    );
+    if (helper) {
+      helper.visible = light.visible;
+    }
+    
+    // Toggle emissive mesh visibility (for area lights)
+    const emissiveMesh = scene.children.find(child => 
+      child.userData.isLightEmissive && child.userData.parentLight === light
+    );
+    if (emissiveMesh) {
+      emissiveMesh.visible = light.visible;
+    }
+    
+    // Update state
+    setLights(prev => prev.map(l => 
+      l.id === lightId ? { ...l, visible: light.visible } : l
+    ));
+  }, [configurator, lights]);
+
   const selectedLight = lights.find(l => l.id === selectedLightId);
 
   return (
@@ -362,6 +514,7 @@ export const LightingControls: React.FC<LightingControlsProps> = ({ configurator
                   { type: 'directional' as const, label: '☀️ Directional', desc: 'Sun-like lighting' },
                   { type: 'point' as const, label: '💡 Point', desc: 'Light bulb' },
                   { type: 'spot' as const, label: '🔦 Spot', desc: 'Cone of light' },
+                  { type: 'area' as const, label: '🟩 Area', desc: 'Panel lighting' },
                 ].map(({ type, label, desc }) => (
                   <button
                     key={type}
@@ -403,16 +556,32 @@ export const LightingControls: React.FC<LightingControlsProps> = ({ configurator
                     <div className="text-sm font-medium">{light.name}</div>
                     <div className="text-xs text-gray-400 capitalize">{light.type} Light</div>
                   </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeLight(light.id);
-                    }}
-                    className="text-red-400 hover:text-red-300 text-sm"
-                    title="Remove light"
-                  >
-                    🗑️
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleLightVisibility(light.id);
+                      }}
+                      className={`text-sm transition-colors ${
+                        light.visible !== false 
+                          ? 'text-blue-400 hover:text-blue-300' 
+                          : 'text-gray-500 hover:text-gray-400'
+                      }`}
+                      title="Toggle light visibility"
+                    >
+                      {light.visible !== false ? '👁️' : '🙈'}
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeLight(light.id);
+                      }}
+                      className="text-red-400 hover:text-red-300 text-sm"
+                      title="Remove light"
+                    >
+                      🗑️
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}

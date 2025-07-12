@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import * as THREE from 'three';
 import { Con3DConfigurator } from '@/core/Con3DConfigurator';
 import { EnhancedRenderingManager, RenderQualitySettings } from '@/core/EnhancedRenderingManager';
 
@@ -21,6 +22,7 @@ export const RenderingQualityControls: React.FC<RenderingQualityControlsProps> =
     lighting: false,
     performance: false,
     advanced: false,
+    render: false,
   });
 
   useEffect(() => {
@@ -56,6 +58,93 @@ export const RenderingQualityControls: React.FC<RenderingQualityControlsProps> =
       if (postProcessing && updates.postProcessing) {
         postProcessing.updateSettings(updates.postProcessing);
       }
+    }
+  };
+
+  // Render function that hides helpers and exports clean image
+  const performRender = async () => {
+    try {
+      const scene = configurator.getScene();
+      const camera = configurator.getCamera();
+      const renderer = configurator.getRenderer();
+      
+      // Get render settings
+      const widthInput = document.getElementById('render-width') as HTMLInputElement;
+      const heightInput = document.getElementById('render-height') as HTMLInputElement;
+      const formatSelect = document.getElementById('render-format') as HTMLSelectElement;
+      
+      const width = parseInt(widthInput?.value || '1920');
+      const height = parseInt(heightInput?.value || '1080');
+      const format = formatSelect?.value || 'png';
+      
+      // Store original renderer size
+      const originalSize = renderer.getSize(new THREE.Vector2());
+      
+      // Store visibility of helpers and gizmos
+      const hiddenObjects: THREE.Object3D[] = [];
+      
+      scene.traverse((object) => {
+        if (
+          object.userData.isHelper ||
+          object.userData.isGizmo ||
+          object.userData.isTransformControls ||
+          object.userData.isLightSelector ||
+          object.userData.hideInRender ||
+          object.name.includes('helper') ||
+          object.name.includes('Helper') ||
+          object.name.includes('gizmo') ||
+          object.name.includes('Gizmo') ||
+          object.name.includes('_target') ||
+          object.name.includes('_selector') ||
+          object.type.includes('Helper')
+        ) {
+          if (object.visible) {
+            object.visible = false;
+            hiddenObjects.push(object);
+          }
+        }
+      });
+      
+      // Set render size
+      renderer.setSize(width, height);
+      
+      // Update camera aspect ratio
+      if (camera instanceof THREE.PerspectiveCamera) {
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+      }
+      
+      // Render the scene
+      renderer.render(scene, camera);
+      
+      // Get the image data
+      const canvas = renderer.domElement;
+      const dataURL = canvas.toDataURL(`image/${format}`);
+      
+      // Create download link
+      const link = document.createElement('a');
+      link.download = `render_${new Date().toISOString().replace(/[:.]/g, '-')}.${format}`;
+      link.href = dataURL;
+      link.click();
+      
+      // Restore original settings
+      renderer.setSize(originalSize.x, originalSize.y);
+      
+      if (camera instanceof THREE.PerspectiveCamera) {
+        camera.aspect = originalSize.x / originalSize.y;
+        camera.updateProjectionMatrix();
+      }
+      
+      // Restore helper visibility
+      hiddenObjects.forEach(object => {
+        object.visible = true;
+      });
+      
+      // Final render to restore viewport
+      renderer.render(scene, camera);
+      
+    } catch (error) {
+      console.error('Failed to render image:', error);
     }
   };
 
@@ -276,18 +365,6 @@ export const RenderingQualityControls: React.FC<RenderingQualityControlsProps> =
             </div>
             
             <div className="flex items-center justify-between">
-              <span className="text-sm">Depth of Field</span>
-              <input
-                type="checkbox"
-                checked={settings.postProcessing.enableDepthOfField}
-                onChange={(e) => updateSettings({
-                  postProcessing: { ...settings.postProcessing, enableDepthOfField: e.target.checked }
-                })}
-                className="w-4 h-4"
-              />
-            </div>
-            
-            <div className="flex items-center justify-between">
               <span className="text-sm">Vignette</span>
               <input
                 type="checkbox"
@@ -297,6 +374,10 @@ export const RenderingQualityControls: React.FC<RenderingQualityControlsProps> =
                 })}
                 className="w-4 h-4"
               />
+            </div>
+            
+            <div className="text-xs text-gray-400 mt-2 p-2 bg-gray-800 rounded">
+              💡 Depth of Field controls are now available in Camera Settings for more precise control
             </div>
           </div>
         )}
@@ -508,6 +589,71 @@ export const RenderingQualityControls: React.FC<RenderingQualityControlsProps> =
               className="w-full px-3 py-2 bg-yellow-600 hover:bg-yellow-700 rounded text-sm font-medium transition-colors"
             >
               Add Area Light
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Render Section */}
+      <div className="border border-gray-700 rounded-lg">
+        <button
+          onClick={() => toggleSection('render')}
+          className="w-full p-3 text-left flex items-center justify-between bg-gray-800 hover:bg-gray-750 rounded-t-lg"
+        >
+          <span className="font-medium">Final Render</span>
+          <span className={`transform transition-transform ${expandedSections.render ? 'rotate-180' : ''}`}>
+            ▼
+          </span>
+        </button>
+        
+        {expandedSections.render && (
+          <div className="p-3 space-y-3">
+            <div className="text-sm text-gray-400 mb-3">
+              Render a clean image without gizmos, helpers, or transform controls
+            </div>
+            
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-sm font-medium mb-1">Width</label>
+                <input
+                  type="number"
+                  defaultValue="1920"
+                  min="256"
+                  max="4096"
+                  className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm"
+                  id="render-width"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Height</label>
+                <input
+                  type="number"
+                  defaultValue="1080"
+                  min="256"
+                  max="4096"
+                  className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm"
+                  id="render-height"
+                />
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium mb-1">Format</label>
+              <select
+                className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm"
+                id="render-format"
+              >
+                <option value="png">PNG</option>
+                <option value="jpeg">JPEG</option>
+                <option value="webp">WebP</option>
+              </select>
+            </div>
+            
+            <button
+              onClick={() => performRender()}
+              className="w-full px-3 py-2 bg-green-600 hover:bg-green-700 rounded text-sm font-medium transition-colors"
+            >
+              🎬 Render Image
             </button>
           </div>
         )}

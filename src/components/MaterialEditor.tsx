@@ -663,6 +663,48 @@ export const MaterialEditor: React.FC<MaterialEditorProps> = ({ configurator, se
             </div>
           </div>
 
+          {/* Sheen (Advanced PBR) */}
+          <div>
+            <h4 className="text-md font-medium mb-3">Sheen (Fabric Properties)</h4>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm mb-1">Sheen: {materialParams.sheen.toFixed(2)}</label>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={materialParams.sheen}
+                  onChange={(e) => updateMaterialProperty('sheen', parseFloat(e.target.value))}
+                  className="w-full"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm mb-1">Sheen Roughness: {materialParams.sheenRoughness.toFixed(2)}</label>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={materialParams.sheenRoughness}
+                  onChange={(e) => updateMaterialProperty('sheenRoughness', parseFloat(e.target.value))}
+                  className="w-full"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm mb-1">Sheen Color</label>
+                <input
+                  type="color"
+                  value={materialParams.sheenColor}
+                  onChange={(e) => updateMaterialProperty('sheenColor', e.target.value)}
+                  className="w-full h-8 rounded border border-gray-600"
+                />
+              </div>
+            </div>
+          </div>
+
           {/* Emission */}
           <div>
             <h4 className="text-md font-medium mb-3">Emission</h4>

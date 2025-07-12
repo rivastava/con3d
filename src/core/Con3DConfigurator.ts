@@ -426,6 +426,125 @@ export class Con3DConfigurator extends EventEmitter implements Con3DAPI {
     this.renderingEngine.switchCamera(camera);
   }
 
+  // Auto-focus camera on object (especially useful for small objects)
+  public focusCameraOnObject(object: THREE.Object3D, distance?: number): void {
+    const camera = this.renderingEngine.camera;
+    const controls = this.renderingEngine.controls;
+    
+    if (!camera || !controls) return;
+    
+    // Get object's bounding box - handle groups properly
+    const box = new THREE.Box3();
+    
+    // For groups, get the combined bounding box of all children
+    if (object.type === 'Group' || object.children.length > 0) {
+      box.setFromObject(object);
+    } else {
+      // For individual meshes
+      if (object instanceof THREE.Mesh && object.geometry) {
+        if (!object.geometry.boundingBox) {
+          object.geometry.computeBoundingBox();
+        }
+        box.copy(object.geometry.boundingBox!);
+        box.applyMatrix4(object.matrixWorld);
+      } else {
+        box.setFromObject(object);
+      }
+    }
+    
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    
+    // Calculate appropriate distance based on object size
+    const maxDimension = Math.max(size.x, size.y, size.z);
+    let focusDistance = distance;
+    
+    if (!focusDistance) {
+      // Enhanced distance calculation for different object sizes
+      if (maxDimension < 0.01) {
+        focusDistance = 0.05; // Very tiny objects - 5cm distance
+      } else if (maxDimension < 0.1) {
+        focusDistance = maxDimension * 5; // Small objects - 5x object size
+      } else if (maxDimension < 1) {
+        focusDistance = maxDimension * 3; // Medium objects - 3x object size
+      } else if (maxDimension < 10) {
+        focusDistance = maxDimension * 1.5; // Large objects - 1.5x object size
+      } else {
+        focusDistance = maxDimension * 1.2; // Very large objects - 1.2x object size
+      }
+      
+      // Ensure minimum distance
+      focusDistance = Math.max(focusDistance, 0.02);
+    }
+    
+    // Calculate optimal camera position
+    const currentDirection = camera.position.clone().sub(center);
+    if (currentDirection.length() < 0.001) {
+      // If camera is at center, use default direction
+      currentDirection.set(1, 1, 1);
+    }
+    currentDirection.normalize();
+    
+    const newPosition = center.clone().add(currentDirection.multiplyScalar(focusDistance));
+    
+    // Animate camera movement
+    const animate = () => {
+      camera.position.copy(newPosition);
+      camera.lookAt(center);
+      
+      // Update controls target
+      controls.target.copy(center);
+      
+      // Adjust clipping planes for object size
+      if (camera instanceof THREE.PerspectiveCamera) {
+        camera.near = Math.max(0.001, focusDistance * 0.01);
+        camera.far = Math.max(camera.near * 2000, focusDistance * 200);
+        camera.updateProjectionMatrix();
+      }
+      
+      controls.update();
+    };
+    
+    animate();
+    
+    console.log(`Camera focused on object: size=${maxDimension.toFixed(3)}, distance=${focusDistance.toFixed(3)}`);
+  }
+
+  // Auto-focus camera on the entire scene
+  public focusCameraOnScene(): void {
+    const scene = this.renderingEngine.scene;
+    
+    // Get bounding box of all visible meshes in scene
+    const box = new THREE.Box3();
+    let hasObjects = false;
+    
+    scene.traverse((object) => {
+      if (object instanceof THREE.Mesh && 
+          object.visible && 
+          !object.userData.isHelper &&
+          !object.userData.isLightSelector &&
+          !object.name.includes('helper')) {
+        
+        const meshBox = new THREE.Box3().setFromObject(object);
+        if (hasObjects) {
+          box.union(meshBox);
+        } else {
+          box.copy(meshBox);
+          hasObjects = true;
+        }
+      }
+    });
+    
+    if (hasObjects) {
+      // Create a temporary object at scene bounds for focusing
+      const tempObject = new THREE.Object3D();
+      tempObject.position.copy(box.getCenter(new THREE.Vector3()));
+      
+      // Focus on the scene bounds
+      this.focusCameraOnObject(tempObject);
+    }
+  }
+
   public enablePostProcessing(effects: string[] = ['fxaa', 'bloom']): void {
     this.postProcessingManager.enable(effects);
   }

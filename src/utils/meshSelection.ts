@@ -48,13 +48,58 @@ const handleMouseUp = (
     mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
     const raycaster = new THREE.Raycaster();
+    
+    // Improve raycaster for small objects
+    raycaster.near = camera.near;
+    raycaster.far = camera.far;
     raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObjects(scene.children, true);
+    
+    // Get all selectable objects (exclude helpers and invisible objects)
+    const selectableObjects: THREE.Object3D[] = [];
+    scene.traverse((object) => {
+      if (
+        object.visible &&
+        !object.userData.isHelper &&
+        !object.userData.hideInOutliner &&
+        !object.userData.isTransformControls &&
+        !object.name.includes('helper') &&
+        !object.name.includes('Helper') &&
+        !object.name.includes('gizmo') &&
+        !object.name.includes('Gizmo') &&
+        !object.name.includes('_target') &&
+        (
+          (object instanceof THREE.Mesh && !object.name.includes('_selector')) ||
+          (object.userData.isLightSelector) // Include light selectors for light selection
+        )
+      ) {
+        selectableObjects.push(object);
+      }
+    });
+    
+    // Use more precise intersection with selectable objects only
+    const intersects = raycaster.intersectObjects(selectableObjects, false);
 
-    const selectedObject = intersects[0]?.object;
-
-    if (selectedObject instanceof THREE.Mesh) {
-      onSelect(selectedObject);
+    if (intersects.length > 0) {
+      const intersectedObject = intersects[0].object;
+      
+      // Check if this is a light selector
+      if (intersectedObject.userData.isLightSelector) {
+        const parentLight = intersectedObject.userData.parentLight;
+        if (parentLight) {
+          console.log('Selected light via selector:', parentLight.name, parentLight.type);
+          // For light selection, we could extend the callback to handle lights
+          // For now, clear mesh selection when light is selected
+          onSelect(null);
+        }
+        return;
+      }
+      
+      if (intersectedObject instanceof THREE.Mesh) {
+        console.log('Selected mesh:', intersectedObject.name, 'at distance:', intersects[0].distance);
+        onSelect(intersectedObject);
+      } else {
+        onSelect(null);
+      }
     } else {
       onSelect(null);
     }
