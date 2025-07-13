@@ -583,6 +583,19 @@ export class Con3DConfigurator extends EventEmitter implements Con3DAPI {
     this.renderingEngine.onMeshSelected(callback);
   }
 
+  // Light selection methods
+  public setSelectedLight(lightId: string | null): void {
+    this.renderingEngine.setSelectedLight(lightId);
+  }
+
+  public getSelectedLight(): string | null {
+    return this.renderingEngine.getSelectedLight();
+  }
+
+  public onLightSelected(callback: (lightId: string | null) => void): void {
+    this.renderingEngine.onLightSelected(callback);
+  }
+
   public getRenderingEngine(): RenderingEngine {
     return this.renderingEngine;
   }

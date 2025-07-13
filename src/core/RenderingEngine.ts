@@ -39,7 +39,9 @@ export class RenderingEngine {
   private raycaster: THREE.Raycaster;
   private mouse: THREE.Vector2;
   private selectedMesh: THREE.Mesh | null = null;
+  private selectedLightId: string | null = null;
   private selectionCallbacks: Array<(mesh: THREE.Mesh | null) => void> = [];
+  private lightSelectionCallbacks: Array<(lightId: string | null) => void> = [];
 
   constructor(container: HTMLElement, options: Con3DOptions = {}) {
     try {
@@ -441,17 +443,23 @@ export class RenderingEngine {
 
     // Find the first selectable object in the intersects
     let newSelectedMesh: THREE.Mesh | null = null;
+    let newSelectedLightId: string | null = null;
+    
     for (const intersect of intersects) {
       if (this.isObjectSelectable(intersect.object)) {
-        // Check if this is a light selector
-        if (intersect.object.userData.isLightSelector) {
-          // Select the parent light instead
+        // Check if this is a light helper
+        if (intersect.object.userData.isLightHelper && intersect.object.userData.lightId) {
+          newSelectedLightId = intersect.object.userData.lightId;
+          console.log(`🔆 Selected light: ${newSelectedLightId} (${intersect.object.userData.lightType})`);
+          break;
+        }
+        // Check if this is a light selector (legacy support)
+        else if (intersect.object.userData.isLightSelector) {
           const parentLight = intersect.object.userData.parentLight;
           if (parentLight) {
-            console.log(`🔆 Selected light: ${parentLight.name || 'Unnamed'} (${parentLight.type})`);
-            // For now, we'll still set selectedMesh to null since we don't have a light selection system
-            // TODO: Implement proper light selection handling
-            newSelectedMesh = null;
+            // Fixed: Properly extract light ID for selection
+            newSelectedLightId = intersect.object.userData.lightId || parentLight.userData?.id || parentLight.name;
+            console.log(`🔆 Selected light via selector: ${newSelectedLightId} (${parentLight.type})`);
             break;
           }
         } else {
@@ -462,8 +470,14 @@ export class RenderingEngine {
       }
     }
 
-    // Update selection
-    this.setSelectedMesh(newSelectedMesh);
+    // Update selections
+    if (newSelectedLightId) {
+      this.setSelectedLight(newSelectedLightId);
+      this.setSelectedMesh(null); // Clear mesh selection when light is selected
+    } else {
+      this.setSelectedMesh(newSelectedMesh);
+      this.setSelectedLight(null); // Clear light selection when mesh is selected
+    }
   }
 
   /**
@@ -485,8 +499,8 @@ export class RenderingEngine {
    * Check if an object can be selected (Blender-style rules)
    */
   private isObjectSelectable(object: THREE.Object3D): boolean {
-    // Must be visible (or be a light selector which is intentionally invisible but selectable)
-    if (!object.visible && !object.userData.isLightSelector) {
+    // Must be visible (or be a light selector/helper which is intentionally invisible but selectable)
+    if (!object.visible && !object.userData.isLightSelector && !object.userData.isLightHelper) {
       return false;
     }
 
@@ -499,8 +513,8 @@ export class RenderingEngine {
       parent = parent.parent;
     }
 
-    // Light selectors are always selectable
-    if (object.userData.isLightSelector) {
+    // Light selectors and helpers are always selectable
+    if (object.userData.isLightSelector || object.userData.isLightHelper) {
       return true;
     }
 
@@ -598,11 +612,15 @@ export class RenderingEngine {
         console.warn('Failed to attach legacy transform controls:', error);
       }
 
-      // Attach new non-interfering transform controls (if enabled)
-      if (this.nonInterferingTransformControls?.isEnabled()) {
+      // Auto-enable and attach new non-interfering transform controls
+      if (this.nonInterferingTransformControls) {
+        this.nonInterferingTransformControls.setEnabled(true);
         this.nonInterferingTransformControls.attachToMesh(this.selectedMesh);
-        console.log(`🎯 Transform controls attached to: ${this.selectedMesh.name || 'Unnamed mesh'}`);
+        console.log(`🎯 Transform controls auto-enabled for: ${this.selectedMesh.name || 'Unnamed mesh'}`);
       }
+      
+      // Clear light selection when mesh is selected
+      this.setSelectedLight(null);
     } else {
       // Detach legacy transform controls when no mesh is selected
       try {
@@ -922,5 +940,47 @@ export class RenderingEngine {
     const prevIndex = currentIndex <= 0 ? selectableObjects.length - 1 : currentIndex - 1;
     
     this.setSelectedMesh(selectableObjects[prevIndex] as THREE.Mesh);
+  }
+
+  public setSelectedLight(lightId: string | null): void {
+    this.selectedLightId = lightId;
+    
+    if (lightId) {
+      console.log(`🔆 Selected light: ${lightId}`);
+      
+      // Auto-enable transform controls for the light helper
+      if (this.nonInterferingTransformControls) {
+        this.nonInterferingTransformControls.setEnabled(true);
+        
+        // Find the light helper object by lightId
+        let lightHelper: THREE.Object3D | null = null;
+        this.scene.traverse((object) => {
+          if (object.userData.isLightHelper && object.userData.lightId === lightId) {
+            lightHelper = object;
+          }
+        });
+        
+        if (lightHelper) {
+          this.nonInterferingTransformControls.attachToMesh(lightHelper as THREE.Mesh);
+          console.log(`🎮 Transform controls attached to light: ${lightId}`);
+        }
+      }
+    } else {
+      // Detach transform controls when no light is selected
+      if (this.nonInterferingTransformControls) {
+        this.nonInterferingTransformControls.detach();
+      }
+    }
+    
+    // Notify callbacks
+    this.lightSelectionCallbacks.forEach(callback => callback(lightId));
+  }
+
+  public getSelectedLight(): string | null {
+    return this.selectedLightId;
+  }
+
+  public onLightSelected(callback: (lightId: string | null) => void): void {
+    this.lightSelectionCallbacks.push(callback);
   }
 }

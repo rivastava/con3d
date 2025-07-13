@@ -6,11 +6,51 @@ interface ModernLightingControlsProps {
   configurator: Con3DConfigurator;
 }
 
+const colorTemperatureToHex = (temp: number): string => {
+  temp = temp / 100;
+  
+  let red: number, green: number, blue: number;
+  
+  if (temp <= 66) {
+    red = 255;
+  } else {
+    red = temp - 60;
+    red = 329.698727446 * Math.pow(red, -0.1332047592);
+    red = Math.max(0, Math.min(255, red));
+  }
+  
+  if (temp <= 66) {
+    green = temp;
+    green = 99.4708025861 * Math.log(green) - 161.1195681661;
+  } else {
+    green = temp - 60;
+    green = 288.1221695283 * Math.pow(green, -0.0755148492);
+  }
+  green = Math.max(0, Math.min(255, green));
+  
+  if (temp >= 66) {
+    blue = 255;
+  } else if (temp <= 19) {
+    blue = 0;
+  } else {
+    blue = temp - 10;
+    blue = 138.5177312231 * Math.log(blue) - 305.0447927307;
+    blue = Math.max(0, Math.min(255, blue));
+  }
+  
+  const r = Math.round(red).toString(16).padStart(2, '0');
+  const g = Math.round(green).toString(16).padStart(2, '0');
+  const b = Math.round(blue).toString(16).padStart(2, '0');
+  
+  return `#${r}${g}${b}`;
+};
+
 export const ModernLightingControls: React.FC<ModernLightingControlsProps> = ({ configurator }) => {
   const [lightingSystem, setLightingSystem] = useState<ModernLightingSystem | null>(null);
   const [lights, setLights] = useState<ModernLightConfig[]>([]);
   const [selectedLightId, setSelectedLightId] = useState<string | null>(null);
   const [showAddMenu, setShowAddMenu] = useState(false);
+  const [colorTemperature, setColorTemperature] = useState<number>(5500); // Default daylight
 
   // Initialize the modern lighting system
   useEffect(() => {
@@ -21,8 +61,21 @@ export const ModernLightingControls: React.FC<ModernLightingControlsProps> = ({ 
       
       // Load initial lights
       refreshLights(system);
+      
+      // Sync with viewport light selection
+      configurator.onLightSelected((lightId) => {
+        console.log('🔄 Viewport selected light:', lightId);
+        setSelectedLightId(lightId);
+      });
     }
   }, [configurator]);
+
+  // Sync selection changes back to viewport
+  useEffect(() => {
+    if (configurator && selectedLightId !== configurator.getSelectedLight()) {
+      configurator.setSelectedLight(selectedLightId);
+    }
+  }, [selectedLightId, configurator]);
 
   const refreshLights = (system?: ModernLightingSystem) => {
     const sys = system || lightingSystem;
@@ -133,7 +186,14 @@ export const ModernLightingControls: React.FC<ModernLightingControlsProps> = ({ 
                     ? 'border-blue-500 bg-blue-900/20'
                     : 'border-gray-600 bg-gray-700 hover:border-gray-500'
                 }`}
-                onClick={() => setSelectedLightId(light.id === selectedLightId ? null : light.id)}
+                onClick={() => {
+                  const newSelectedId = light.id === selectedLightId ? null : light.id;
+                  setSelectedLightId(newSelectedId);
+                  // Also update the configurator selection
+                  if (configurator) {
+                    configurator.setSelectedLight(newSelectedId);
+                  }
+                }}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -204,18 +264,91 @@ export const ModernLightingControls: React.FC<ModernLightingControlsProps> = ({ 
                 onChange={(e) => updateLightProperty(selectedLight.id, 'intensity', parseFloat(e.target.value))}
                 className="w-full"
               />
+              <div className="flex justify-between text-xs text-gray-400 mt-1">
+                <span>0</span>
+                <span>2.5</span>
+                <span>5</span>
+              </div>
             </div>
 
             {/* Color */}
             <div>
               <label className="block text-sm font-medium mb-1">Color</label>
-              <input
-                type="color"
-                value={selectedLight.properties.color}
-                onChange={(e) => updateLightProperty(selectedLight.id, 'color', e.target.value)}
-                className="w-full h-8 rounded border border-gray-600"
-              />
+              <div className="flex gap-2">
+                <input
+                  type="color"
+                  value={selectedLight.properties.color}
+                  onChange={(e) => updateLightProperty(selectedLight.id, 'color', e.target.value)}
+                  className="flex-1 h-8 rounded border border-gray-600"
+                />
+                <button
+                  onClick={() => updateLightProperty(selectedLight.id, 'color', '#ffffff')}
+                  className="px-2 py-1 bg-gray-600 hover:bg-gray-500 rounded text-xs"
+                  title="Reset to white"
+                >
+                  ⚪
+                </button>
+              </div>
+              <div className="mt-2">
+                <label className="block text-xs text-gray-400 mb-1">Quick Colors</label>
+                <div className="flex gap-1">
+                  {[
+                    { color: '#ffffff', name: 'White' },
+                    { color: '#fff5e6', name: 'Warm White' },
+                    { color: '#e6f3ff', name: 'Cool White' },
+                    { color: '#ffb366', name: 'Tungsten' },
+                    { color: '#ff6b6b', name: 'Red' },
+                    { color: '#4ecdc4', name: 'Cyan' },
+                    { color: '#45b7d1', name: 'Blue' },
+                    { color: '#96ceb4', name: 'Green' },
+                  ].map(({ color, name }) => (
+                    <button
+                      key={color}
+                      onClick={() => updateLightProperty(selectedLight.id, 'color', color)}
+                      className="w-6 h-6 rounded border border-gray-500 hover:border-white transition-colors"
+                      style={{ backgroundColor: color }}
+                      title={name}
+                    />
+                  ))}
+                </div>
+              </div>
             </div>
+
+            {/* Color Temperature (for compatible lights) */}
+            {selectedLight.type !== 'ambient' && (
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Color Temperature: {colorTemperature} K
+                </label>
+                <input
+                  type="range"
+                  min="1000"
+                  max="10000"
+                  step="100"
+                  value={colorTemperature}
+                  onChange={(e) => {
+                    const newTemp = parseInt(e.target.value);
+                    setColorTemperature(newTemp);
+                    const hexColor = colorTemperatureToHex(newTemp);
+                    updateLightProperty(selectedLight.id, 'color', hexColor);
+                  }}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-xs text-gray-400 mt-1">
+                  <span>Candlelight</span>
+                  <span>Daylight</span>
+                  <span>Cool Blue</span>
+                </div>
+                <div className="text-xs text-gray-400 mt-1">
+                  {colorTemperature < 2000 && "🕯️ Warm candlelight"}
+                  {colorTemperature >= 2000 && colorTemperature < 3000 && "💡 Tungsten bulb"}
+                  {colorTemperature >= 3000 && colorTemperature < 4000 && "🌅 Sunrise/sunset"}
+                  {colorTemperature >= 4000 && colorTemperature < 5500 && "🌤️ Cool white"}
+                  {colorTemperature >= 5500 && colorTemperature < 6500 && "☀️ Daylight"}
+                  {colorTemperature >= 6500 && "🌌 Cool blue sky"}
+                </div>
+              </div>
+            )}
 
             {/* Position (for non-ambient lights) */}
             {selectedLight.type !== 'ambient' && selectedLight.properties.position && (
