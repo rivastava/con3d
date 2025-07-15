@@ -476,7 +476,12 @@ export class RenderingEngine {
       this.setSelectedMesh(null); // Clear mesh selection when light is selected
     } else {
       this.setSelectedMesh(newSelectedMesh);
-      this.setSelectedLight(null); // Clear light selection when mesh is selected
+      // Clear light selection when mesh is selected (but don't call setSelectedLight to avoid detaching)
+      if (this.selectedLightId) {
+        console.log(`🎯 Clearing light selection (${this.selectedLightId}) because mesh was selected`);
+        this.selectedLightId = null;
+        this.lightSelectionCallbacks.forEach(callback => callback(null));
+      }
     }
   }
 
@@ -591,6 +596,13 @@ export class RenderingEngine {
   }
 
   public setSelectedMesh(mesh: THREE.Mesh | null): void {
+    console.log(`🔍 setSelectedMesh called with:`, mesh?.name || 'null');
+    console.log(`🔍 Current selected mesh:`, this.selectedMesh?.name || 'null');
+    
+    if (mesh === null) {
+      console.trace(`🔍 setSelectedMesh(null) called from:`); // Show stack trace for null calls
+    }
+    
     // Clear previous selection highlight
     if (this.selectedMesh) {
       this.outlineManager.deselectMesh(this.selectedMesh);
@@ -602,35 +614,36 @@ export class RenderingEngine {
     if (this.selectedMesh) {
       this.outlineManager.selectMesh(this.selectedMesh);
       
-      // Automatically attach and enable legacy transform controls (if available)
-      try {
-        if (this.sceneTransformControls && typeof this.sceneTransformControls.attachToMesh === 'function') {
-          this.sceneTransformControls.attachToMesh(this.selectedMesh);
-          this.sceneTransformControls.setEnabled(true);
-        }
-      } catch (error) {
-        console.warn('Failed to attach legacy transform controls:', error);
-      }
+      // DISABLED: Legacy transform controls to prevent conflicts
+      // try {
+      //   if (this.sceneTransformControls && typeof this.sceneTransformControls.attachToMesh === 'function') {
+      //     this.sceneTransformControls.attachToMesh(this.selectedMesh);
+      //     this.sceneTransformControls.setEnabled(true);
+      //   }
+      // } catch (error) {
+      //   console.warn('Failed to attach legacy transform controls:', error);
+      // }
 
       // Auto-enable and attach new non-interfering transform controls
       if (this.nonInterferingTransformControls) {
+        console.log(`🎯 Attempting to attach transform controls to: ${this.selectedMesh.name || 'Unnamed mesh'}`);
         this.nonInterferingTransformControls.setEnabled(true);
         this.nonInterferingTransformControls.attachToMesh(this.selectedMesh);
-        console.log(`🎯 Transform controls auto-enabled for: ${this.selectedMesh.name || 'Unnamed mesh'}`);
+        console.log(`🎯 Transform controls enabled: ${this.nonInterferingTransformControls.isEnabled()}`);
+        console.log(`🎯 Transform controls visible: ${this.nonInterferingTransformControls.isVisible()}`);
+      } else {
+        console.warn('⚠️ NonInterferingTransformControls not available');
       }
-      
-      // Clear light selection when mesh is selected
-      this.setSelectedLight(null);
     } else {
-      // Detach legacy transform controls when no mesh is selected
-      try {
-        if (this.sceneTransformControls && typeof this.sceneTransformControls.attachToMesh === 'function') {
-          this.sceneTransformControls.attachToMesh(null);
-          this.sceneTransformControls.setEnabled(false);
-        }
-      } catch (error) {
-        console.warn('Failed to detach legacy transform controls:', error);
-      }
+      // DISABLED: Legacy transform controls to prevent conflicts
+      // try {
+      //   if (this.sceneTransformControls && typeof this.sceneTransformControls.attachToMesh === 'function') {
+      //     this.sceneTransformControls.attachToMesh(null);
+      //     this.sceneTransformControls.setEnabled(false);
+      //   }
+      // } catch (error) {
+      //   console.warn('Failed to detach legacy transform controls:', error);
+      // }
 
       // Detach new transform controls
       if (this.nonInterferingTransformControls) {
@@ -966,9 +979,13 @@ export class RenderingEngine {
         }
       }
     } else {
-      // Detach transform controls when no light is selected
-      if (this.nonInterferingTransformControls) {
+      // Only detach transform controls if they're currently attached to a light
+      // Don't detach if they're attached to a mesh
+      if (this.nonInterferingTransformControls && 
+          this.selectedLightId && 
+          !this.selectedMesh) {
         this.nonInterferingTransformControls.detach();
+        console.log(`🎮 Transform controls detached from light (no light selected)`);
       }
     }
     

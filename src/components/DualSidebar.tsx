@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import * as THREE from 'three';
 import { Con3DConfigurator } from '@/core/Con3DConfigurator';
-import { MaterialEditor } from './MaterialEditor';
+import { MaterialEditor } from './MaterialEditorEnhanced';
 import { MaterialLibrary } from './MaterialLibrary';
 import { SceneControls } from './SceneControls';
 import { TransformControls } from './TransformControls';

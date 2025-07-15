@@ -7,6 +7,7 @@ import { SceneIndicators } from './components/SceneIndicators';
 import { FullscreenToggle } from './components/FullscreenToggle';
 import { Con3DConfigurator } from './core/Con3DConfigurator';
 import { setupMeshSelection } from './utils/meshSelection';
+import { debugSceneObjects } from '../debug_scene';
 
 function App() {
   const configuratorRef = React.useRef<Con3DConfigurator | null>(null);
@@ -57,7 +58,19 @@ function App() {
     const camera = configurator.getCamera();
     const scene = configurator.getScene();
     
+    // Expose debug function globally
+    (window as any).debugScene = () => debugSceneObjects(scene);
+    (window as any).con3d = configurator;
+    
     const handleMeshSelection = (mesh: THREE.Mesh | null) => {
+      console.log('🎯 Mesh selected:', mesh?.name, mesh?.type);
+      if (mesh?.material) {
+        console.log('Material info:', {
+          type: Array.isArray(mesh.material) ? `Array[${mesh.material.length}]` : (mesh.material as any).type,
+          uuid: Array.isArray(mesh.material) ? mesh.material[0]?.uuid : (mesh.material as any).uuid
+        });
+      }
+      
       setSelectedMesh(prevSelected => {
         if (prevSelected === mesh) {
           return prevSelected; // No change, don't trigger re-render

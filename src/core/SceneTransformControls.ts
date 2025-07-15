@@ -399,6 +399,16 @@ export class SceneTransformControls {
     
     if (mesh) {
       try {
+        // Ensure geometry is properly updated before attaching gizmo
+        if (mesh.geometry) {
+          // Force recalculation of bounding box and sphere
+          mesh.geometry.computeBoundingBox();
+          mesh.geometry.computeBoundingSphere();
+          
+          // Update world matrix to ensure proper positioning
+          mesh.updateMatrixWorld(true);
+        }
+        
         this.transformControls.attach(mesh);
         this.transformControls.visible = true;
         
@@ -412,21 +422,36 @@ export class SceneTransformControls {
           const cameraDistance = this.camera.position.distanceTo(center);
           const maxDimension = Math.max(size.x, size.y, size.z);
           
-          // Professional scaling: smaller gizmos for large objects, larger for small objects
-          // Based on screen-space size rather than world-space size
+          // Improved gizmo scaling for better usability
           let scaleFactor = 1.0;
           if (maxDimension > 0 && cameraDistance > 0) {
-            // Scale based on angular size (how big the object appears on screen)
+            // Better scaling algorithm that works well with applied transforms
             const angularSize = maxDimension / cameraDistance;
-            scaleFactor = Math.max(0.5, Math.min(2.0, 1.0 / angularSize * 0.1));
+            // Adjusted scaling factors for better visibility
+            scaleFactor = Math.max(0.3, Math.min(1.5, 1.0 / (angularSize * 2.0)));
+            
+            // Clamp extreme values for very small or very large objects
+            if (maxDimension < 0.1) {
+              scaleFactor = Math.max(scaleFactor, 0.5);
+            } else if (maxDimension > 100) {
+              scaleFactor = Math.min(scaleFactor, 0.8);
+            }
           }
           
           this.currentSize = scaleFactor;
           this.transformControls.setSize(scaleFactor);
+          
+          // Debug logging for gizmo scaling
+          if (process.env.NODE_ENV !== 'development') {
+            console.log(`🎯 Gizmo attached to "${mesh.name}": size=${maxDimension.toFixed(2)}, distance=${cameraDistance.toFixed(2)}, scale=${scaleFactor.toFixed(2)}`);
+          }
         }
         
         // Reset any axis constraints when attaching to new mesh
         this.removeAxisConstraints();
+        
+        // Refresh the gizmo display
+        this.refreshGizmo();
         
       } catch (error) {
         console.warn('Failed to attach transform controls:', error);
@@ -437,6 +462,29 @@ export class SceneTransformControls {
       this.transformControls.detach();
       this.transformControls.visible = false;
       this.removeAxisConstraints();
+    }
+  }
+
+  /**
+   * Refresh the gizmo display and positioning
+   */
+  private refreshGizmo(): void {
+    if (this.selectedMesh && this.transformControls.visible) {
+      // Force update of transform controls
+      this.transformControls.updateMatrixWorld();
+      
+      // Re-calculate mesh position
+      this.selectedMesh.updateMatrixWorld(true);
+      
+      // Trigger a render update
+      if (this.onTransformCallback) {
+        // Use setTimeout to avoid issues during geometry updates
+        setTimeout(() => {
+          if (this.selectedMesh && this.onTransformCallback) {
+            this.onTransformCallback(this.selectedMesh);
+          }
+        }, 0);
+      }
     }
   }
 
@@ -514,5 +562,20 @@ export class SceneTransformControls {
       size: this.currentSize,
       isDragging: this.isDragging
     };
+  }
+
+  /**
+   * Update gizmo after geometry has been modified (e.g., after applying transforms)
+   */
+  public updateAfterGeometryChange(): void {
+    if (this.selectedMesh) {
+      // Re-attach to refresh the gizmo with updated geometry
+      const currentMesh = this.selectedMesh;
+      this.attachToMesh(null);
+      // Use setTimeout to ensure proper cleanup before re-attachment
+      setTimeout(() => {
+        this.attachToMesh(currentMesh);
+      }, 0);
+    }
   }
 }

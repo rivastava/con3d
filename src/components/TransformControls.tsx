@@ -174,6 +174,26 @@ export const TransformControls: React.FC<TransformControlsProps> = ({ configurat
     }
   }, [selectedMesh, configurator]);
 
+  const applyTransforms = useCallback(() => {
+    if (!selectedMesh || !isInitialized) return;
+    
+    try {
+      // Call the configurator's apply transforms method
+      configurator.applyTransforms();
+      
+      // Reset UI values since transforms have been applied
+      setPosition({ x: 0, y: 0, z: 0 });
+      setRotation({ x: 0, y: 0, z: 0 });
+      setScale({ x: 1, y: 1, z: 1 });
+      
+      // Use setTimeout to avoid logging during render cycle
+      setTimeout(() => console.log('Transforms applied to all meshes'), 0);
+    } catch (error) {
+      // Use setTimeout to avoid logging during render cycle
+      setTimeout(() => console.error('Error applying transforms:', error), 0);
+    }
+  }, [selectedMesh, configurator, isInitialized]);
+
   if (!selectedMesh) {
     return (
       <div className="p-4 bg-gray-800 text-white h-full flex flex-col">
@@ -354,20 +374,29 @@ export const TransformControls: React.FC<TransformControlsProps> = ({ configurat
       </div>
 
       {/* Quick Actions */}
-      <div className="mb-4 flex space-x-2">
+      <div className="mb-4 space-y-2">
+        <div className="flex space-x-2">
+          <button
+            onClick={resetTransform}
+            className="btn btn-secondary flex-1"
+            title="Reset all transforms to default"
+          >
+            🔄 Reset
+          </button>
+          <button
+            onClick={duplicateMesh}
+            className="btn btn-secondary flex-1"
+            title="Duplicate selected object"
+          >
+            📋 Duplicate
+          </button>
+        </div>
         <button
-          onClick={resetTransform}
-          className="btn btn-secondary flex-1"
-          title="Reset all transforms to default"
+          onClick={applyTransforms}
+          className="btn btn-warning w-full"
+          title="Apply Transform - Bakes transforms into geometry vertices while resetting object transform to identity (like Blender's Apply Transform)"
         >
-          🔄 Reset
-        </button>
-        <button
-          onClick={duplicateMesh}
-          className="btn btn-secondary flex-1"
-          title="Duplicate selected object"
-        >
-          📋 Duplicate
+          ⚡ Apply Transform
         </button>
       </div>
 

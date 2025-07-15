@@ -57,16 +57,35 @@ const handleMouseUp = (
     // Get all selectable objects (exclude helpers and invisible objects)
     const selectableObjects: THREE.Object3D[] = [];
     scene.traverse((object) => {
+      // Check if this object or any parent is a transform control
+      let isTransformControlChild = false;
+      let parent = object.parent;
+      while (parent) {
+        if (parent.userData?.isTransformControls || parent.name?.includes('TransformControls')) {
+          isTransformControlChild = true;
+          break;
+        }
+        parent = parent.parent;
+      }
+      
       if (
         object.visible &&
         !object.userData.isHelper &&
         !object.userData.hideInOutliner &&
         !object.userData.isTransformControls &&
+        !isTransformControlChild &&
         !object.name.includes('helper') &&
         !object.name.includes('Helper') &&
         !object.name.includes('gizmo') &&
         !object.name.includes('Gizmo') &&
         !object.name.includes('_target') &&
+        !object.name.includes('AxesHelper') &&
+        !object.name.includes('GridHelper') &&
+        !object.name.includes('TransformControls') &&
+        // Filter out individual axis components (X, Y, Z mesh parts)
+        !object.name.match(/^[XYZ]$/i) &&
+        !object.name.includes('axis') &&
+        !object.name.includes('Axis') &&
         (
           (object instanceof THREE.Mesh && !object.name.includes('_selector')) ||
           (object.userData.isLightSelector) // Include light selectors for light selection
@@ -95,12 +114,15 @@ const handleMouseUp = (
       }
       
       if (intersectedObject instanceof THREE.Mesh) {
-        console.log('Selected mesh:', intersectedObject.name, 'at distance:', intersects[0].distance);
+        console.log('🎯 Selected:', intersectedObject.name, '(Mesh)');
+        console.log('🔍 Calling onSelect with mesh:', intersectedObject.name);
         onSelect(intersectedObject);
       } else {
+        console.log('🔍 Intersected object is not a mesh, calling onSelect(null)');
         onSelect(null);
       }
     } else {
+      console.log('🔍 No intersections found, calling onSelect(null)');
       onSelect(null);
     }
   } catch (error) {
@@ -108,6 +130,7 @@ const handleMouseUp = (
     if (process.env.NODE_ENV !== 'development') {
       console.error('Error during mesh selection:', error);
     }
+    console.log('🔍 Error during selection, calling onSelect(null)');
     onSelect(null);
   }
 };

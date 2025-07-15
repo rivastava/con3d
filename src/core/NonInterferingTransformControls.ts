@@ -86,8 +86,14 @@ export class NonInterferingTransformControls {
       // Add to scene (but don't attach to any object yet)
       this.scene.add(this.transformControls);
       
+      // Initially set to invisible until attached to a mesh
+      this.transformControls.visible = false;
+      
       this.enabled = true;
       console.log('✅ Transform controls initialized successfully');
+      console.log(`🎯 Transform controls in scene: ${this.scene.children.includes(this.transformControls)}`);
+      console.log(`🎯 Transform controls visible: ${this.transformControls.visible}`);
+      console.log(`🎯 Transform controls enabled: ${this.enabled}`);
       
     } catch (error) {
       console.error('❌ Failed to initialize transform controls:', error);
@@ -211,15 +217,34 @@ export class NonInterferingTransformControls {
   }
 
   public attachToMesh(mesh: THREE.Mesh | null): void {
-    if (this.isDisposed || !this.enabled || !this.transformControls) return;
+    if (this.isDisposed) return;
 
     try {
       this.selectedMesh = mesh;
       
       if (mesh) {
-        this.transformControls.attach(mesh);
-        this.setVisible(true);
-        console.log(`🎯 Transform controls attached to: ${mesh.name || 'Unnamed mesh'}`);
+        // Ensure transform controls are initialized and enabled
+        if (!this.transformControls) {
+          this.initialize();
+        }
+        
+        if (!this.enabled) {
+          this.setEnabled(true);
+        }
+        
+        if (this.transformControls) {
+          this.transformControls.attach(mesh);
+          this.setVisible(true);
+          
+          // Force update the transform controls to ensure they appear
+          this.transformControls.updateMatrixWorld();
+          
+          console.log(`🎯 Transform controls attached to: ${mesh.name || 'Unnamed mesh'}`);
+          console.log(`🎯 Transform controls visible: ${this.transformControls.visible}`);
+          console.log(`🎯 Transform controls enabled: ${this.enabled}`);
+        } else {
+          console.warn('⚠️ Transform controls not initialized after attach attempt');
+        }
       } else {
         this.detach();
       }
@@ -230,6 +255,8 @@ export class NonInterferingTransformControls {
 
   public detach(): void {
     if (this.transformControls) {
+      console.log(`🎯 Transform controls detached`);
+      console.trace(`🔍 Detach called from:`); // This will show the call stack
       this.transformControls.detach();
       this.setVisible(false);
     }
@@ -272,6 +299,11 @@ export class NonInterferingTransformControls {
   public setVisible(visible: boolean): void {
     if (this.transformControls) {
       this.transformControls.visible = visible;
+      console.log(`🎯 Transform controls visibility set to: ${visible}`);
+      console.log(`🎯 Transform controls actual visibility: ${this.transformControls.visible}`);
+      console.log(`🎯 Transform controls attached object:`, (this.transformControls as any).object?.name || 'none');
+    } else {
+      console.warn('⚠️ Trying to set visibility but transform controls not initialized');
     }
   }
 
@@ -292,6 +324,28 @@ export class NonInterferingTransformControls {
     
     if (this.transformControls) {
       this.configureTransformControls();
+    }
+  }
+
+  /**
+   * Update controls after geometry has been modified (e.g., after applying transforms)
+   */
+  public updateAfterGeometryChange(): void {
+    if (this.selectedMesh && this.transformControls) {
+      // Force recalculation of mesh bounds
+      if (this.selectedMesh.geometry) {
+        this.selectedMesh.geometry.computeBoundingBox();
+        this.selectedMesh.geometry.computeBoundingSphere();
+      }
+      
+      // Update world matrix
+      this.selectedMesh.updateMatrixWorld(true);
+      
+      // Refresh the gizmo position to match the updated geometry
+      this.transformControls.updateMatrixWorld();
+      
+      console.log(`✓ Transform controls updated after geometry change for "${this.selectedMesh.name}"`);
+      console.log(`🎯 Object position after apply: ${this.selectedMesh.position.x.toFixed(2)}, ${this.selectedMesh.position.y.toFixed(2)}, ${this.selectedMesh.position.z.toFixed(2)}`);
     }
   }
 

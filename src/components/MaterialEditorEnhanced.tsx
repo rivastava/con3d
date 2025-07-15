@@ -232,6 +232,17 @@ export const MaterialEditor: React.FC<MaterialEditorProps> = ({ configurator, se
   const [activeSection, setActiveSection] = useState<'basic' | 'advanced' | 'textures' | 'presets'>('basic');
 
   useEffect(() => {
+    // Debug material detection
+    if (process.env.NODE_ENV !== 'development') {
+      console.log('🔍 MaterialEditor: selectedMesh changed', {
+        meshName: selectedMesh?.name,
+        hasMaterial: !!selectedMesh?.material,
+        materialType: selectedMesh?.material ? (Array.isArray(selectedMesh.material) ? 'Array' : (selectedMesh.material as any).type) : 'none',
+        geometryUuid: selectedMesh?.geometry?.uuid?.substring(0, 8),
+        materialUuid: selectedMesh?.material ? (Array.isArray(selectedMesh.material) ? selectedMesh.material[0]?.uuid?.substring(0, 8) : (selectedMesh.material as any).uuid?.substring(0, 8)) : 'none'
+      });
+    }
+    
     if (selectedMesh && selectedMesh.material) {
       // Handle material arrays by taking the first material
       const meshMaterial = Array.isArray(selectedMesh.material) 
@@ -273,6 +284,31 @@ export const MaterialEditor: React.FC<MaterialEditorProps> = ({ configurator, se
           aoMapIntensity: oldMat.aoMapIntensity,
         });
         
+        // Preserve material metadata for imported materials
+        mat.userData = { ...oldMat.userData, converted: true, originalType: 'MeshStandardMaterial' };
+        
+        // Schedule Three.js mutation for next tick to avoid render cycle side effects
+        setTimeout(() => {
+          if (selectedMesh) {
+            selectedMesh.material = mat;
+          }
+        }, 0);
+      } else if (meshMaterial instanceof THREE.MeshBasicMaterial) {
+        // Convert MeshBasicMaterial to MeshPhysicalMaterial for editing
+        const oldMat = meshMaterial;
+        mat = new THREE.MeshPhysicalMaterial({
+          color: oldMat.color,
+          opacity: oldMat.opacity,
+          transparent: oldMat.transparent,
+          map: oldMat.map,
+          // Set appropriate defaults for basic materials
+          metalness: 0.0,
+          roughness: 1.0, // Basic materials are typically non-reflective
+        });
+        
+        // Preserve material metadata
+        mat.userData = { ...oldMat.userData, converted: true, originalType: 'MeshBasicMaterial' };
+        
         // Schedule Three.js mutation for next tick to avoid render cycle side effects
         setTimeout(() => {
           if (selectedMesh) {
@@ -289,6 +325,9 @@ export const MaterialEditor: React.FC<MaterialEditorProps> = ({ configurator, se
           metalness: 0.0,
           roughness: 0.5,
         });
+        
+        // Preserve material metadata
+        mat.userData = { ...oldMat.userData, converted: true, originalType: oldMat.type || 'Unknown' };
         
         // Schedule Three.js mutation for next tick to avoid render cycle side effects
         setTimeout(() => {
@@ -337,7 +376,14 @@ export const MaterialEditor: React.FC<MaterialEditorProps> = ({ configurator, se
     } else {
       setMaterial(null);
     }
-  }, [selectedMesh]);
+  }, [
+    selectedMesh, 
+    selectedMesh?.geometry?.uuid, 
+    selectedMesh?.material, 
+    Array.isArray(selectedMesh?.material) 
+      ? selectedMesh.material[0]?.uuid 
+      : (selectedMesh?.material as THREE.Material)?.uuid
+  ]);
 
   // Add material change to history
   const addToHistory = useCallback((params: typeof materialParams) => {
@@ -610,31 +656,37 @@ export const MaterialEditor: React.FC<MaterialEditorProps> = ({ configurator, se
         <h3 className="text-lg font-semibold">Material Editor</h3>
         <p className="text-sm text-gray-400">
           Editing: <span className="text-blue-400 font-medium">{selectedMesh.name || 'Unnamed Object'}</span>
-        </p>
-        
-        {/* Material Type Selector */}
-        <div className="mt-3">
-          <label className="block text-sm mb-2">Material Type</label>
-          <select
-            value={material ? 'physical' : 'none'}
-            onChange={(e) => {
-              if (e.target.value === 'new') {
-                createNewMaterial();
-              } else if (e.target.value === 'standard') {
-                createStandardMaterial();
-              } else if (e.target.value === 'basic') {
-                createBasicMaterial();
-              }
-            }}
-            className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white text-sm"
-          >
-            <option value="none">No Material</option>
-            <option value="physical">Physical Material (PBR)</option>
-            <option value="new">+ Create New Physical Material</option>
-            <option value="standard">+ Create Standard Material</option>
-            <option value="basic">+ Create Basic Material</option>
-          </select>
-        </div>
+        </p>          {/* Material Type Selector */}
+          <div className="mt-3">
+            <label className="block text-sm mb-2">Material Type</label>
+            <select
+              value={material ? 'physical' : 'none'}
+              onChange={(e) => {
+                if (e.target.value === 'new') {
+                  createNewMaterial();
+                } else if (e.target.value === 'standard') {
+                  createStandardMaterial();
+                } else if (e.target.value === 'basic') {
+                  createBasicMaterial();
+                }
+              }}
+              className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white text-sm"
+            >
+              <option value="none">No Material</option>
+              <option value="physical">
+                Physical Material (PBR) 
+                {material?.userData?.converted ? ' - Auto-converted' : ''}
+              </option>
+              <option value="new">+ Create New Physical Material</option>
+              <option value="standard">+ Create Standard Material</option>
+              <option value="basic">+ Create Basic Material</option>
+            </select>
+            {material?.userData?.originalType && (
+              <div className="mt-1 text-xs text-blue-400">
+                ℹ️ Originally: {material.userData.originalType}
+              </div>
+            )}
+          </div>
       </div>
 
       {material && (
@@ -743,10 +795,21 @@ export const MaterialEditor: React.FC<MaterialEditorProps> = ({ configurator, se
             </span>
           </div>
           {selectedMesh.material && !Array.isArray(selectedMesh.material) && (
-            <div className="mt-2 text-xs text-gray-400">
+            <div className="mt-2 text-xs text-gray-400 space-y-1">
               <div>UUID: {(selectedMesh.material as THREE.Material).uuid.substring(0, 8)}...</div>
               {(selectedMesh.material as THREE.Material).name && (
                 <div>Name: {(selectedMesh.material as THREE.Material).name}</div>
+              )}
+              {(selectedMesh.material as THREE.Material).userData?.originalType && (
+                <div className="text-blue-400">
+                  Converted from: {(selectedMesh.material as THREE.Material).userData.originalType}
+                </div>
+              )}
+              {(selectedMesh.material as THREE.Material).userData?.imported && (
+                <div className="text-green-400">✓ Imported material (auto-converted for editing)</div>
+              )}
+              {(selectedMesh.material as THREE.Material).userData?.converted && (
+                <div className="text-yellow-400">⚡ Auto-converted for advanced editing</div>
               )}
             </div>
           )}

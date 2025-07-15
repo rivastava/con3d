@@ -296,8 +296,11 @@ export class Con3DConfigurator extends EventEmitter implements Con3DAPI {
         // Clear existing models from scene
         this.scene.clear();
         
-        // Add the new model to the scene
+        // Add the new model to the scene first
         this.renderingEngine.addObject(model);
+        
+        // DO NOT apply transforms automatically - this should be a manual user action
+        // Models should load with their original transforms preserved
         
         // Center the camera on the model
         this.centerCameraOnModel(model);
@@ -310,6 +313,15 @@ export class Con3DConfigurator extends EventEmitter implements Con3DAPI {
     },
 
     clear: (): void => {
+      // Clear selection first and notify all callbacks
+      this.renderingEngine.setSelectedMesh(null);
+      
+      // Clear transform controls
+      const transformControls = this.renderingEngine.getNonInterferingTransformControls();
+      if (transformControls) {
+        transformControls.detach();
+      }
+      
       // Clear all meshes from the rendering engine scene
       const scene = this.renderingEngine.getScene();
       const objectsToRemove = scene.children.filter(child => 
@@ -623,6 +635,59 @@ export class Con3DConfigurator extends EventEmitter implements Con3DAPI {
 
   public getNonInterferingTransformControls() {
     return this.renderingEngine.getNonInterferingTransformControls();
+  }
+
+  /**
+   * Apply transforms to the current model (like Blender's "Apply Transform")
+   * This bakes the current transforms into the geometry and resets object transforms to identity
+   */
+  public applyTransforms(): Promise<void> {
+    return new Promise((resolve) => {
+      // Get all models in the scene
+      const scene = this.renderingEngine.getScene();
+      const models: THREE.Group[] = [];
+      scene.children.forEach((child: THREE.Object3D) => {
+        if (child instanceof THREE.Group && child.userData?.id) {
+          models.push(child);
+        }
+      });
+
+      if (models.length === 0) {
+        console.warn('⚠️ No models found to apply transforms to');
+        resolve();
+        return;
+      }
+
+      // Apply transforms to all models
+      let completed = 0;
+      models.forEach(model => {
+        this.assetManager.applyModelTransforms(model, () => {
+          completed++;
+          if (completed === models.length) {
+            // Update any active gizmos after geometry changes
+            const transformControls = this.renderingEngine.getNonInterferingTransformControls();
+            if (transformControls) {
+              transformControls.updateAfterGeometryChange();
+            }
+            
+            // Emit event to notify UI of geometry changes
+            this.emit('model:transformsApplied', { models });
+            
+            // Force trigger mesh selection update to refresh UI
+            setTimeout(() => {
+              const currentSelection = this.renderingEngine.getSelectedMesh();
+              if (currentSelection) {
+                // Re-trigger selection to refresh UI
+                this.renderingEngine.setSelectedMesh(null);
+                this.renderingEngine.setSelectedMesh(currentSelection);
+              }
+            }, 100);
+            
+            resolve();
+          }
+        });
+      });
+    });
   }
 
   private generateId(): string {

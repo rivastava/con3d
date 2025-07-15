@@ -6,6 +6,7 @@ import { GLTFExporter } from 'three-stdlib';
 import { MeshoptDecoder } from 'three-stdlib';
 import { AssetConfig, AssetMetadata } from '@/types';
 import { safeProdLog } from '../utils/developmentLogger';
+import { debugModelImport } from '../utils/debugModelImport';
 
 // GLTF Extension support types
 interface GLTFExtensionSupport {
@@ -175,6 +176,11 @@ export class AssetManager {
       // Process the model with enhanced material and extension support
       this.processModelWithExtensions(model, gltf);
       
+      // Debug logging for development
+      if (process.env.NODE_ENV !== 'development') {
+        debugModelImport(model);
+      }
+      
       // Cache the model
       this.loadedModels.set(fullUrl, model);
       
@@ -264,6 +270,9 @@ export class AssetManager {
   private processModelWithExtensions(model: THREE.Group, gltf: any): void {
     let meshIndex = 0;
     
+    // DO NOT apply transforms automatically - let users choose when to apply them
+    // this.applyModelTransforms(model); // REMOVED - this was causing all pivots to reset to (0,0,0)
+    
     model.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         // Generate unique ID for mesh
@@ -286,6 +295,9 @@ export class AssetManager {
             this.processMaterialWithExtensions(child.material, gltf);
           }
         }
+        
+        // Ensure mesh is ready for selection and editing
+        this.ensureMeshEditability(child);
       }
       
       // Process lights if KHR_lights_punctual extension is used
@@ -313,8 +325,21 @@ export class AssetManager {
    * Process material with enhanced GLTF extension support
    */
   private processMaterialWithExtensions(material: THREE.Material, _gltf: any): void {
+    // Convert all materials to MeshPhysicalMaterial for consistent editing
+    if (material instanceof THREE.MeshBasicMaterial && !(material instanceof THREE.MeshPhysicalMaterial)) {
+      // Skip conversion for basic materials, but ensure they're editable
+      material.userData.materialType = 'basic';
+      material.userData.editable = true;
+      return;
+    }
+    
+    // For imported models, ensure materials are editable and properly configured
     if (material instanceof THREE.MeshStandardMaterial || 
         material instanceof THREE.MeshPhysicalMaterial) {
+      
+      // Mark as editable
+      material.userData.editable = true;
+      material.userData.imported = true;
       
       // Ensure proper texture encoding
       if (material.map) {
@@ -355,6 +380,14 @@ export class AssetManager {
       if (material instanceof THREE.MeshPhysicalMaterial && material.iridescence > 0) {
         safeProdLog('✓ Iridescence material detected');
       }
+      
+      // Ensure material updates properly
+      material.needsUpdate = true;
+    } else {
+      // For other material types, mark them as needing conversion
+      material.userData.needsConversion = true;
+      material.userData.originalType = material.type;
+      material.userData.editable = true;
     }
   }
 
@@ -560,5 +593,166 @@ export class AssetManager {
     // Dispose loaders
     this.dracoLoader.dispose();
     this.ktx2Loader.dispose();
+  }
+
+  /**
+   * Ensure mesh has editable material and proper setup for selection
+   */
+  public ensureMeshEditability(mesh: THREE.Mesh): void {
+    // Ensure mesh has proper geometry for selection
+    if (mesh.geometry) {
+      mesh.geometry.computeBoundingBox();
+      mesh.geometry.computeBoundingSphere();
+    }
+    
+    // Mark as selectable
+    mesh.userData.selectable = true;
+    mesh.userData.materialEditable = true;
+    
+    // Ensure material is in a compatible format
+    if (mesh.material) {
+      if (Array.isArray(mesh.material)) {
+        mesh.material.forEach(mat => {
+          mat.userData.editable = true;
+          mat.needsUpdate = true;
+        });
+      } else {
+        mesh.material.userData.editable = true;
+        mesh.material.needsUpdate = true;
+      }
+    }
+    
+    if (process.env.NODE_ENV !== 'development') {
+      console.log(`✓ Mesh "${mesh.name}" prepared for editing and selection`);
+    }
+  }
+
+  /**
+   * Apply transforms to model geometry (like Blender's "Apply Transform")
+   * This bakes the current transform into the geometry and resets object transform to identity
+   * The mesh stays visually in the same place but the origin moves to (0,0,0)
+   */
+  public applyModelTransforms(model: THREE.Group, onComplete?: () => void): void {
+    let appliedCount = 0;
+    
+    model.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.geometry) {
+        // Store original material references before any modifications
+        const originalMaterial = child.material;
+        const originalUserData = { ...child.userData };
+        
+        // Check if the mesh has any non-identity transforms
+        const hasTransforms = 
+          !child.position.equals(new THREE.Vector3(0, 0, 0)) ||
+          !child.rotation.equals(new THREE.Euler(0, 0, 0)) ||
+          !child.scale.equals(new THREE.Vector3(1, 1, 1));
+          
+        if (hasTransforms) {
+          // Create a matrix from the current transform
+          const matrix = new THREE.Matrix4();
+          matrix.compose(child.position, child.quaternion, child.scale);
+          
+          // Apply the transform to the geometry vertices (this is the key step)
+          // This moves the vertices so the mesh stays visually in the same place
+          // even after we reset the object transform to identity
+          child.geometry.applyMatrix4(matrix);
+          
+          // Update bounding box and sphere after geometry modification
+          child.geometry.computeBoundingBox();
+          child.geometry.computeBoundingSphere();
+          
+          // Recompute vertex normals for correct shading after transform
+          child.geometry.computeVertexNormals();
+          
+          // Reset the object transform to identity (like Blender)
+          // This moves the origin/pivot to world center (0,0,0)
+          child.position.set(0, 0, 0);
+          child.rotation.set(0, 0, 0);
+          child.scale.set(1, 1, 1);
+          
+          // Update matrix world after transform reset
+          child.updateMatrixWorld(true);
+          
+          console.log(`🎯 Applied transform to "${child.name}", origin now at (0,0,0)`);
+          
+          appliedCount++;
+        }
+        
+        // Restore material references and userData (critical for selection)
+        child.material = originalMaterial;
+        child.userData = { ...originalUserData };
+        
+        // Ensure mesh remains selectable and editable
+        this.ensureMeshEditability(child);
+        
+        // Force material update if it exists
+        if (child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach(mat => {
+              mat.needsUpdate = true;
+            });
+          } else {
+            child.material.needsUpdate = true;
+          }
+        }
+      }
+    });
+    
+    // Apply transforms to the root group as well if needed
+    const hasRootTransforms = 
+      !model.position.equals(new THREE.Vector3(0, 0, 0)) ||
+      !model.rotation.equals(new THREE.Euler(0, 0, 0)) ||
+      !model.scale.equals(new THREE.Vector3(1, 1, 1));
+      
+    if (hasRootTransforms) {
+      // For root group, we need to apply transforms to all children
+      const matrix = new THREE.Matrix4();
+      matrix.compose(model.position, model.quaternion, model.scale);
+      
+      model.children.forEach(child => {
+        if (child instanceof THREE.Mesh && child.geometry) {
+          // Store material references before applying matrix
+          const originalMaterial = child.material;
+          const originalUserData = { ...child.userData };
+          
+          child.geometry.applyMatrix4(matrix);
+          child.geometry.computeBoundingBox();
+          child.geometry.computeBoundingSphere();
+          child.geometry.computeVertexNormals();
+          
+          // Restore material and userData
+          child.material = originalMaterial;
+          child.userData = { ...originalUserData };
+          
+          // Ensure mesh remains selectable
+          this.ensureMeshEditability(child);
+        } else {
+          // For non-mesh children, apply transform to their position
+          child.applyMatrix4(matrix);
+        }
+      });
+      
+      // Reset root transform to identity (origin moves to world center)
+      model.position.set(0, 0, 0);
+      model.rotation.set(0, 0, 0);
+      model.scale.set(1, 1, 1);
+      
+      // Update matrix world after transform reset
+      model.updateMatrixWorld(true);
+      
+      console.log(`🎯 Applied root transform, origin now at (0,0,0)`);
+      appliedCount++;
+    }
+    
+    if (process.env.NODE_ENV !== 'development') {
+      console.log(`✓ Applied transforms for ${appliedCount} objects in model "${model.name}"`);
+      console.log(`✓ Materials preserved and meshes remain selectable`);
+    }
+    
+    // Call completion callback if provided
+    if (onComplete) {
+      // Use setTimeout to ensure all geometry updates are complete
+      setTimeout(onComplete, 0);
+    }
   }
 }
