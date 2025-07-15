@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { categorizeObject, ObjectCategory } from '../utils/meshFiltering';
 
 /**
  * Professional Lighting Enhancement System
@@ -18,11 +19,17 @@ export class AdvancedLightingSystem {
   // Light linking system
   private lightLinks: Map<string, { lightId: string; meshId: string; enabled: boolean; influence: number }> = new Map();
   
+  // Light index tracking for shader linking
+  private lightIndexMap: Map<string, number> = new Map();
+  private userLights: THREE.Light[] = [];
+  private static readonly MAX_LIGHTS = 8; // Conservative limit for shader uniforms
+  
   constructor(scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
     this.scene = scene;
     this.renderer = renderer;
     
     this.initializeAdvancedLighting();
+    this.updateLightIndices();
   }
   
   private initializeAdvancedLighting(): void {
@@ -340,6 +347,9 @@ export class AdvancedLightingSystem {
    * Apply light linking by modifying mesh materials with custom shader chunks
    */
   private applyLightLinking(): void {
+    // Ensure light indices are up to date
+    this.updateLightIndices();
+    
     this.scene.traverse((object) => {
       if (object instanceof THREE.Mesh && object.material) {
         const materials = Array.isArray(object.material) ? object.material : [object.material];
@@ -394,18 +404,24 @@ export class AdvancedLightingSystem {
    */
   private applyCustomLightingShader(
     material: THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial,
-    _excludedLights: string[],
-    _lightInfluences: { [lightId: string]: number }
+    excludedLights: string[],
+    lightInfluences: { [lightId: string]: number }
   ): void {
-    // Custom shader chunk to modify light contributions
-    const lightLinkingChunk = `
-      // Light linking modification
-      vec3 lightLinkingModifier(vec3 lightContribution, int lightIndex) {
-        // This is a simplified approach - in a full implementation,
-        // you would need to track light indices and apply influences
-        return lightContribution;
+    // Build light influence array for shader
+    const influences = new Float32Array(AdvancedLightingSystem.MAX_LIGHTS);
+    influences.fill(1.0); // Default full influence
+    
+    // Apply specific influences and exclusions
+    for (let i = 0; i < this.userLights.length && i < AdvancedLightingSystem.MAX_LIGHTS; i++) {
+      const light = this.userLights[i];
+      const lightId = light.uuid;
+      
+      if (excludedLights.includes(lightId)) {
+        influences[i] = 0.0; // Completely exclude
+      } else if (lightInfluences[lightId] !== undefined) {
+        influences[i] = lightInfluences[lightId]; // Custom influence
       }
-    `;
+    }
 
     // Store the original onBeforeCompile if it exists
     const originalOnBeforeCompile = material.onBeforeCompile;
@@ -416,17 +432,61 @@ export class AdvancedLightingSystem {
         originalOnBeforeCompile(shader, renderer);
       }
 
-      // Add our custom light linking code
+      // Add uniforms for light linking
+      shader.uniforms.lightInfluences = { value: influences };
+      shader.uniforms.userLightCount = { value: Math.min(this.userLights.length, AdvancedLightingSystem.MAX_LIGHTS) };
+
+      // Add helper function to get light influence
+      const lightLinkingPreamble = `
+        uniform float lightInfluences[${AdvancedLightingSystem.MAX_LIGHTS}];
+        uniform int userLightCount;
+        
+        float getLightInfluence(int lightIndex) {
+          if (lightIndex >= userLightCount || lightIndex < 0) return 1.0;
+          return lightInfluences[lightIndex];
+        }
+      `;
+
+      // Insert uniforms and helper function before lighting calculations
       shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <lights_physical_fragment>',
+        '#include <common>',
         `
-        ${lightLinkingChunk}
-        #include <lights_physical_fragment>
+        #include <common>
+        ${lightLinkingPreamble}
+        `
+      );
+
+      // Patch directional light contributions
+      shader.fragmentShader = shader.fragmentShader.replace(
+        /directLight\.irradiance = ( \*= )?( )?directionalLights\[ i \]\.color( \* )?;?/g,
+        `directLight.irradiance = directionalLights[ i ].color * getLightInfluence(i);`
+      );
+
+      // Patch point light contributions - target the distance attenuation line
+      shader.fragmentShader = shader.fragmentShader.replace(
+        /directLight\.irradiance = punctualLightIntensityToIrradiance\( punctualLightIntensity, distanceToLight, pointLights\[ i \]\.distance, pointLights\[ i \]\.decay \);?/g,
+        `directLight.irradiance = punctualLightIntensityToIrradiance( punctualLightIntensity, distanceToLight, pointLights[ i ].distance, pointLights[ i ].decay ) * getLightInfluence(i + NUM_DIR_LIGHTS);`
+      );
+
+      // Patch spot light contributions
+      shader.fragmentShader = shader.fragmentShader.replace(
+        /directLight\.irradiance = punctualLightIntensityToIrradiance\( punctualLightIntensity, distanceToLight, spotLights\[ i \]\.distance, spotLights\[ i \]\.decay \);?/g,
+        `directLight.irradiance = punctualLightIntensityToIrradiance( punctualLightIntensity, distanceToLight, spotLights[ i ].distance, spotLights[ i ].decay ) * getLightInfluence(i + NUM_DIR_LIGHTS + NUM_POINT_LIGHTS);`
+      );
+
+      // Alternative fallback: patch the final light accumulation if specific patches don't work
+      shader.fragmentShader = shader.fragmentShader.replace(
+        'reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );',
+        `
+        reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );
         `
       );
 
       // Store shader reference for potential updates
       (material as any).userData.customShader = shader;
+      (material as any).userData.lightInfluenceArray = influences;
+      
+      console.log('🔗 Applied light linking shader to material:', material.name || material.uuid);
     };
   }
 
@@ -436,6 +496,9 @@ export class AdvancedLightingSystem {
   private removeCustomLightingShader(material: THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial): void {
     (material as any).onBeforeCompile = undefined;
     delete (material as any).userData.customShader;
+    delete (material as any).userData.lightInfluenceArray;
+    delete (material as any).userData.hasLightLinking;
+    material.needsUpdate = true;
   }
 
   /**
@@ -445,7 +508,7 @@ export class AdvancedLightingSystem {
     const lights: { id: string; name: string; type: string; light: THREE.Light }[] = [];
     
     this.scene.traverse((object) => {
-      if (object instanceof THREE.Light) {
+      if (object instanceof THREE.Light && categorizeObject(object) === ObjectCategory.USER_LIGHT) {
         lights.push({
           id: object.uuid,
           name: object.name || `${object.type} ${object.uuid.slice(0, 8)}`,
@@ -465,7 +528,7 @@ export class AdvancedLightingSystem {
     const meshes: { id: string; name: string; mesh: THREE.Mesh }[] = [];
     
     this.scene.traverse((object) => {
-      if (object instanceof THREE.Mesh && object.name && !object.name.includes('Helper')) {
+      if (object instanceof THREE.Mesh && categorizeObject(object) === ObjectCategory.USER_MESH) {
         meshes.push({
           id: object.uuid,
           name: object.name || `Mesh ${object.uuid.slice(0, 8)}`,
@@ -490,5 +553,142 @@ export class AdvancedLightingSystem {
   public clearAllLightLinks(): void {
     this.lightLinks.clear();
     this.applyLightLinking();
+  }
+
+  /**
+   * Update light indices for shader linking
+   */
+  private updateLightIndices(): void {
+    this.userLights = [];
+    this.lightIndexMap.clear();
+    
+    // Collect all user lights (excluding system lights)
+    this.scene.traverse((object) => {
+      if (object instanceof THREE.Light && categorizeObject(object) === ObjectCategory.USER_LIGHT) {
+        this.userLights.push(object);
+      }
+    });
+    
+    // Assign indices (limit to MAX_LIGHTS for shader compatibility)
+    const maxLights = Math.min(this.userLights.length, AdvancedLightingSystem.MAX_LIGHTS);
+    for (let i = 0; i < maxLights; i++) {
+      const light = this.userLights[i];
+      this.lightIndexMap.set(light.uuid, i);
+    }
+    
+    console.log(`🔗 Light linking: Updated ${maxLights} light indices`);
+  }
+  
+  /**
+   * Update light linking when lights are added/removed
+   */
+  public refreshLightIndices(): void {
+    this.updateLightIndices();
+    // Re-apply linking to all materials with updated indices
+    this.applyLightLinking();
+  }
+
+  /**
+   * Update material uniforms for light linking without full shader recompilation
+   */
+  public updateMaterialLighting(material: THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial, meshId: string): void {
+    if (!material.userData.customShader || !material.userData.lightInfluenceArray) {
+      return; // No custom shader applied
+    }
+    
+    // Get current light links for this mesh
+    const excludedLights: string[] = [];
+    const lightInfluences: { [lightId: string]: number } = {};
+    
+    this.lightLinks.forEach((link) => {
+      if (link.meshId === meshId) {
+        if (!link.enabled) {
+          excludedLights.push(link.lightId);
+        } else if (link.influence !== 1.0) {
+          lightInfluences[link.lightId] = link.influence;
+        }
+      }
+    });
+    
+    // Update the influence array
+    const influences = material.userData.lightInfluenceArray as Float32Array;
+    influences.fill(1.0); // Reset to default
+    
+    for (let i = 0; i < this.userLights.length && i < AdvancedLightingSystem.MAX_LIGHTS; i++) {
+      const light = this.userLights[i];
+      const lightId = light.uuid;
+      
+      if (excludedLights.includes(lightId)) {
+        influences[i] = 0.0;
+      } else if (lightInfluences[lightId] !== undefined) {
+        influences[i] = lightInfluences[lightId];
+      }
+    }
+    
+    // Update the uniform if shader is available
+    const shader = material.userData.customShader;
+    if (shader && shader.uniforms.lightInfluences) {
+      shader.uniforms.lightInfluences.value = influences;
+    }
+  }
+  
+  /**
+   * Get light influence for a specific light and mesh (for debugging)
+   */
+  public getLightInfluence(lightId: string, meshId: string): number {
+    const linkKey = `${lightId}_${meshId}`;
+    const link = this.lightLinks.get(linkKey);
+    return link ? (link.enabled ? link.influence : 0.0) : 1.0;
+  }
+
+  /**
+   * Debug method to test light linking functionality
+   */
+  public debugLightLinking(): void {
+    console.log('🔗 Light Linking Debug Information:');
+    console.log(`- User lights tracked: ${this.userLights.length}`);
+    console.log(`- Light links stored: ${this.lightLinks.size}`);
+    console.log(`- Light index map:`, Array.from(this.lightIndexMap.entries()));
+    
+    // Test linking by excluding the first light from all meshes
+    if (this.userLights.length > 0) {
+      const firstLight = this.userLights[0];
+      console.log(`- Testing: Excluding light "${firstLight.name}" from all meshes`);
+      this.disableLightForAllMeshes(firstLight.uuid);
+      
+      // Re-enable after 3 seconds
+      setTimeout(() => {
+        console.log(`- Re-enabling light "${firstLight.name}" for all meshes`);
+        this.enableLightForAllMeshes(firstLight.uuid);
+      }, 3000);
+    }
+  }
+  
+  /**
+   * Get debug information about current light linking state
+   */
+  public getLightLinkingDebugInfo(): {
+    userLights: number;
+    lightLinks: number;
+    materialsWithLinking: number;
+  } {
+    let materialsWithLinking = 0;
+    
+    this.scene.traverse((object) => {
+      if (object instanceof THREE.Mesh && object.material) {
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach((material) => {
+          if ((material as any).userData?.hasLightLinking) {
+            materialsWithLinking++;
+          }
+        });
+      }
+    });
+    
+    return {
+      userLights: this.userLights.length,
+      lightLinks: this.lightLinks.size,
+      materialsWithLinking
+    };
   }
 }

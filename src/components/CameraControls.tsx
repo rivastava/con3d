@@ -525,7 +525,7 @@ export const CameraControls: React.FC<CameraControlsProps> = ({ configurator }) 
               <input
                 type="range"
                 min="14"
-                max="200"
+                max="500"
                 step="1"
                 value={advancedSettings.focalLength}
                 onChange={(e) => {
@@ -536,7 +536,7 @@ export const CameraControls: React.FC<CameraControlsProps> = ({ configurator }) 
                 className="w-full"
               />
               <div className="text-xs text-gray-400 mt-1">
-                Range: 14mm (1.4cm) - 200mm (20cm) • Professional camera focal lengths
+                Range: 14mm - 500mm • Wide angle to super telephoto
               </div>
             </div>
             
@@ -618,9 +618,9 @@ export const CameraControls: React.FC<CameraControlsProps> = ({ configurator }) 
               </label>
               <input
                 type="range"
-                min="5"
-                max="10000"
-                step="5"
+                min="1"
+                max="1000"
+                step="1"
                 value={advancedSettings.focusDistance * 100}
                 disabled={advancedSettings.focusTarget !== 'manual'}
                 onChange={(e) => {
@@ -636,7 +636,7 @@ export const CameraControls: React.FC<CameraControlsProps> = ({ configurator }) 
                 className={`w-full ${advancedSettings.focusTarget !== 'manual' ? 'opacity-50 cursor-not-allowed' : ''}`}
               />
               <div className="text-xs text-gray-400 mt-1">
-                Range: 5cm - 100m • Professional camera focus distances
+                Range: 1cm - 10m • Professional camera focus distances
               </div>
             </div>
             

@@ -152,6 +152,8 @@ export const ModernLightingControls: React.FC<ModernLightingControlsProps> = ({ 
                   { type: 'point' as const, label: '💡 Point', desc: 'Light bulb' },
                   { type: 'spot' as const, label: '🔦 Spot', desc: 'Cone of light' },
                   { type: 'area' as const, label: '🟩 Area', desc: 'Panel lighting' },
+                  { type: 'hemisphere' as const, label: '🌐 Hemisphere', desc: 'Sky lighting' },
+                  { type: 'ring' as const, label: '⭕ Ring', desc: 'Circular array' },
                 ].map(({ type, label, desc }) => (
                   <button
                     key={type}
@@ -203,6 +205,8 @@ export const ModernLightingControls: React.FC<ModernLightingControlsProps> = ({ 
                       {light.type === 'point' && '💡'}
                       {light.type === 'spot' && '🔦'}
                       {light.type === 'area' && '🟩'}
+                      {light.type === 'hemisphere' && '🌐'}
+                      {light.type === 'ring' && '⭕'}
                     </div>
                     <div>
                       <div className="font-medium text-sm">{light.name}</div>

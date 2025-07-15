@@ -35,6 +35,10 @@ export const LightingControls: React.FC<LightingControlsProps> = ({ configurator
   const transformControlsRef = useRef<TransformControls | null>(null);
   const selectedLightRef = useRef<THREE.Light | null>(null);
 
+  // Light linking integration
+  const [lightLinkingEnabled, setLightLinkingEnabled] = useState<boolean>(false);
+  const [advancedLightingSystem, setAdvancedLightingSystem] = useState<any>(null);
+
   // Initialize with existing lights in the scene
   useEffect(() => {
     if (!configurator) return;
@@ -98,6 +102,21 @@ export const LightingControls: React.FC<LightingControlsProps> = ({ configurator
     const transformControls = new TransformControls(camera, renderer.domElement);
     transformControlsRef.current = transformControls;
     
+    // Mark transform controls as system objects
+    transformControls.userData.isTransformControl = true;
+    transformControls.userData.isSystemObject = true;
+    transformControls.name = 'LightTransformControls';
+    
+    // Mark all children (gizmo elements) as transform handles
+    transformControls.traverse((child) => {
+      child.userData.isTransformControl = true;
+      child.userData.isSystemObject = true;
+      child.userData.isTransformHandle = true;
+      if (!child.name) {
+        child.name = `LightTransformControl_${child.type}`;
+      }
+    });
+    
     // Add to scene
     scene.add(transformControls);
 
@@ -156,6 +175,16 @@ export const LightingControls: React.FC<LightingControlsProps> = ({ configurator
       if (selectedLight && gizmoEnabled && 'position' in selectedLight) {
         transformControlsRef.current.attach(selectedLight);
         transformControlsRef.current.visible = true;
+        
+        // Mark all transform control children as system objects after attachment
+        transformControlsRef.current.traverse((child) => {
+          child.userData.isTransformControl = true;
+          child.userData.isSystemObject = true;
+          child.userData.isTransformHandle = true;
+          if (!child.name) {
+            child.name = `LightTransformControl_${child.type}`;
+          }
+        });
       } else {
         transformControlsRef.current.detach();
         transformControlsRef.current.visible = false;
@@ -268,6 +297,9 @@ export const LightingControls: React.FC<LightingControlsProps> = ({ configurator
     setLights(prev => [...prev, newLightConfig]);
     setSelectedLightId(light.uuid);
     setShowAddMenu(false);
+    
+    // Notify advanced lighting system of light change
+    notifyLightChange();
   }, [configurator]);
 
   const removeLight = useCallback((lightId: string) => {
@@ -299,6 +331,9 @@ export const LightingControls: React.FC<LightingControlsProps> = ({ configurator
     if (selectedLightId === lightId) {
       setSelectedLightId(null);
     }
+    
+    // Notify advanced lighting system of light change
+    notifyLightChange();
   }, [configurator, lights, selectedLightId]);
 
   const updateLightProperty = useCallback((lightId: string, property: string, value: any) => {
@@ -492,6 +527,32 @@ export const LightingControls: React.FC<LightingControlsProps> = ({ configurator
     ));
   }, [configurator, lights]);
 
+  // Initialize advanced lighting system for light linking
+  useEffect(() => {
+    if (!configurator) return;
+
+    try {
+      const advancedSystem = configurator.getAdvancedLightingSystem();
+      if (advancedSystem) {
+        setAdvancedLightingSystem(advancedSystem);
+        setLightLinkingEnabled(true);
+        console.log('🔗 Advanced lighting system available - light linking enabled');
+      } else {
+        console.log('⚠️ Advanced lighting system not available - light linking disabled');
+      }
+    } catch (error) {
+      console.warn('Failed to initialize advanced lighting system:', error);
+    }
+  }, [configurator]);
+
+  // Notify advanced lighting system of light changes
+  const notifyLightChange = useCallback(() => {
+    if (advancedLightingSystem) {
+      // Refresh light indices when lights are added/removed
+      advancedLightingSystem.refreshLightIndices();
+    }
+  }, [advancedLightingSystem]);
+
   const selectedLight = lights.find(l => l.id === selectedLightId);
 
   return (
@@ -650,6 +711,19 @@ export const LightingControls: React.FC<LightingControlsProps> = ({ configurator
         <div className="border-t border-gray-700 pt-4">
           <h4 className="text-md font-medium mb-3">Light Properties</h4>
           <div className="space-y-3">
+            {/* Light Linking Status */}
+            {lightLinkingEnabled && (
+              <div className="p-3 bg-gray-700 rounded-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium">🔗 Light Linking</span>
+                  <span className="text-xs text-green-400">Available</span>
+                </div>
+                <div className="text-xs text-gray-400">
+                  Advanced light linking is enabled. Use the Light Linker panel to control which objects this light affects.
+                </div>
+              </div>
+            )}
+
             {/* Intensity */}
             <div>
               <label className="block text-sm mb-1">

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import * as THREE from 'three';
 import { Con3DConfigurator } from '@/core/Con3DConfigurator';
+import { getUserMeshesSimple } from '@/utils/meshFiltering';
 
 interface MaterialEditorProps {
   configurator: Con3DConfigurator;
@@ -184,8 +185,73 @@ export const MaterialEditor: React.FC<MaterialEditorProps> = ({ configurator, se
   });
 
   useEffect(() => {
-    if (selectedMesh && selectedMesh.material instanceof THREE.MeshPhysicalMaterial) {
-      const mat = selectedMesh.material;
+    if (selectedMesh && selectedMesh.material) {
+      // Handle material arrays by taking the first material
+      const meshMaterial = Array.isArray(selectedMesh.material) 
+        ? selectedMesh.material[0] 
+        : selectedMesh.material;
+      
+      if (!meshMaterial) {
+        setMaterial(null);
+        return;
+      }
+      
+      let mat: THREE.MeshPhysicalMaterial;
+      
+      // Handle different material types
+      if (meshMaterial instanceof THREE.MeshPhysicalMaterial) {
+        mat = meshMaterial;
+      } else if (meshMaterial instanceof THREE.MeshStandardMaterial) {
+        // Convert MeshStandardMaterial to MeshPhysicalMaterial
+        const oldMat = meshMaterial;
+        mat = new THREE.MeshPhysicalMaterial({
+          color: oldMat.color,
+          opacity: oldMat.opacity,
+          transparent: oldMat.transparent,
+          metalness: oldMat.metalness,
+          roughness: oldMat.roughness,
+          map: oldMat.map,
+          normalMap: oldMat.normalMap,
+          roughnessMap: oldMat.roughnessMap,
+          metalnessMap: oldMat.metalnessMap,
+          aoMap: oldMat.aoMap,
+          emissiveMap: oldMat.emissiveMap,
+          emissive: oldMat.emissive,
+          emissiveIntensity: oldMat.emissiveIntensity,
+          envMapIntensity: oldMat.envMapIntensity,
+          normalScale: oldMat.normalScale,
+          side: oldMat.side,
+          alphaTest: oldMat.alphaTest,
+          depthTest: oldMat.depthTest,
+          depthWrite: oldMat.depthWrite
+        });
+        
+        // Replace the material on the mesh
+        if (Array.isArray(selectedMesh.material)) {
+          selectedMesh.material[0] = mat;
+        } else {
+          selectedMesh.material = mat;
+        }
+        
+        // Dispose old material
+        oldMat.dispose();
+      } else {
+        // Handle other material types or create a default MeshPhysicalMaterial
+        const anyMaterial = meshMaterial as any;
+        mat = new THREE.MeshPhysicalMaterial({
+          color: anyMaterial.color || new THREE.Color(0xffffff),
+          transparent: anyMaterial.transparent || false,
+          opacity: anyMaterial.opacity !== undefined ? anyMaterial.opacity : 1.0
+        });
+        
+        // Replace the material on the mesh
+        if (Array.isArray(selectedMesh.material)) {
+          selectedMesh.material[0] = mat;
+        } else {
+          selectedMesh.material = mat;
+        }
+      }
+      
       setMaterial(mat);
       
       // Load current material parameters
@@ -398,18 +464,7 @@ export const MaterialEditor: React.FC<MaterialEditorProps> = ({ configurator, se
 
   const getAllMeshes = () => {
     const scene = configurator.getScene();
-    const meshes: Array<{ id: string, name: string }> = [];
-    
-    scene.traverse((object) => {
-      if (object instanceof THREE.Mesh && object.name && !object.name.includes('Helper')) {
-        meshes.push({
-          id: object.uuid,
-          name: object.name || `Mesh ${object.uuid.slice(0, 8)}`
-        });
-      }
-    });
-    
-    return meshes;
+    return getUserMeshesSimple(scene);
   };
 
   const categories = ['All', ...Array.from(new Set(MATERIAL_LIBRARY.map(m => m.category)))];
@@ -423,9 +478,78 @@ export const MaterialEditor: React.FC<MaterialEditorProps> = ({ configurator, se
 
   if (!selectedMesh) {
     return (
-      <div className="p-4 bg-gray-800 text-white">
+      <div className="p-4 bg-gray-800 text-white max-h-screen overflow-y-auto">
         <h3 className="text-lg font-semibold mb-4">Material Editor</h3>
-        <p className="text-gray-400">Select a mesh to edit its material</p>
+        
+        {/* Show helpful information when no mesh is selected */}
+        <div className="mb-6">
+          <p className="text-gray-400 mb-4">Select a mesh to edit its material, or browse the material library below.</p>
+          
+          {/* Quick actions */}
+          <div className="mb-4">
+            <button
+              onClick={() => setShowMaterialLibrary(!showMaterialLibrary)}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded transition-colors"
+            >
+              {showMaterialLibrary ? 'Hide' : 'Browse'} Material Library ({MATERIAL_LIBRARY.length} presets)
+            </button>
+          </div>
+          
+          {/* Show available meshes */}
+          <div className="bg-gray-700 rounded p-3 mb-4">
+            <h4 className="text-sm font-medium mb-2">Available Meshes:</h4>
+            <div className="max-h-32 overflow-y-auto">
+              {getAllMeshes().map(mesh => (
+                <div key={mesh.id} className="text-xs text-gray-300 py-1">
+                  • {mesh.name}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Material Library */}
+        {showMaterialLibrary && (
+          <div className="bg-gray-700 rounded p-4">
+            <h4 className="text-md font-medium mb-4">Material Library</h4>
+            
+            {/* Category Filter */}
+            <div className="mb-4">
+              <label className="block text-sm mb-2">Category</label>
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="w-full bg-gray-600 text-white p-2 rounded"
+              >
+                {categories.map(category => (
+                  <option key={category} value={category}>{category}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Materials Grid */}
+            <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
+              {filteredMaterials.map((preset, index) => (
+                <div
+                  key={index}
+                  className="bg-gray-600 hover:bg-gray-500 p-3 rounded cursor-pointer transition-colors"
+                  style={{ borderLeft: `4px solid ${preset.params.color}` }}
+                  title={`${preset.name} - ${preset.category}`}
+                >
+                  <div className="text-xs font-medium">{preset.name}</div>
+                  <div className="text-xs text-gray-400">{preset.category}</div>
+                  <div className="text-xs text-gray-300 mt-1">
+                    M: {preset.params.metalness.toFixed(1)} R: {preset.params.roughness.toFixed(1)}
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            <p className="text-xs text-gray-400 mt-3">
+              Select a mesh first to apply materials from the library.
+            </p>
+          </div>
+        )}
       </div>
     );
   }

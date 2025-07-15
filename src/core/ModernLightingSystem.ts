@@ -1,12 +1,14 @@
 import * as THREE from 'three';
+import { RectAreaLightUniformsLib } from 'three-stdlib';
 
 export interface ModernLightConfig {
   id: string;
   name: string;
-  type: 'ambient' | 'directional' | 'point' | 'spot' | 'area';
+  type: 'ambient' | 'directional' | 'point' | 'spot' | 'area' | 'hemisphere' | 'ring';
   light: THREE.Light;
   helper?: THREE.Object3D;
   emissiveMesh?: THREE.Mesh;
+  selector?: THREE.Mesh; // Invisible selector for viewport interaction
   visible: boolean;
   properties: {
     intensity: number;
@@ -33,6 +35,10 @@ export class ModernLightingSystem {
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
+    
+    // Initialize RectAreaLight uniforms for area light support
+    RectAreaLightUniformsLib.init();
+    
     console.log('🔥 ModernLightingSystem initialized');
   }
 
@@ -58,7 +64,7 @@ export class ModernLightingSystem {
       case 'directional': {
         const dirProps = defaultProperties as any;
         light = new THREE.DirectionalLight(dirProps.color, dirProps.intensity);
-        light.position.copy(dirProps.position || new THREE.Vector3(5, 10, 5));
+        light.position.set(0, 2, 0); // Spawn near world origin
         light.castShadow = true;
         if (light.shadow) {
           light.shadow.mapSize.setScalar(2048);
@@ -85,7 +91,7 @@ export class ModernLightingSystem {
           pointProps.distance || 10,
           pointProps.decay || 2
         );
-        light.position.copy(pointProps.position || new THREE.Vector3(0, 3, 0));
+        light.position.set(0, 2, 0); // Spawn near world origin
         light.castShadow = true;
         if (light.shadow) {
           light.shadow.mapSize.setScalar(1024);
@@ -181,7 +187,7 @@ export class ModernLightingSystem {
           spotProps.penumbra || 0.1,
           spotProps.decay || 2
         );
-        light.position.copy(spotProps.position || new THREE.Vector3(0, 5, 0));
+        light.position.set(0, 2, 0); // Spawn near world origin
         light.castShadow = true;
         if (light.shadow) {
           light.shadow.mapSize.setScalar(1024);
@@ -262,7 +268,7 @@ export class ModernLightingSystem {
           areaProps.width || 2,
           areaProps.height || 2
         );
-        light.position.copy(areaProps.position || new THREE.Vector3(0, 3, 0));
+        light.position.set(0, 2, 0); // Spawn near world origin
         light.lookAt(0, 0, 0);
         
         // Create enhanced area light helper group with professional appearance
@@ -363,6 +369,96 @@ export class ModernLightingSystem {
         break;
       }
 
+      case 'hemisphere': {
+        const hemiProps = defaultProperties as any;
+        light = new THREE.HemisphereLight(hemiProps.skyColor || hemiProps.color, hemiProps.groundColor || 0x444444, hemiProps.intensity);
+        light.position.set(0, 2, 0); // Spawn near world origin
+        
+        // Create hemisphere helper
+        helper = new THREE.HemisphereLightHelper(light as THREE.HemisphereLight, 1);
+        helper.name = `${name}_helper`;
+        helper.userData = {
+          isLightHelper: true,
+          lightId: id,
+          lightType: 'hemisphere',
+          selectable: true
+        };
+        break;
+      }
+
+      case 'ring': {
+        // Ring light is implemented as multiple point lights arranged in a circle
+        const ringProps = defaultProperties as any;
+        const ringGroup = new THREE.Group();
+        ringGroup.name = name;
+        
+        const numLights = 8;
+        const radius = ringProps.radius || 3;
+        
+        for (let i = 0; i < numLights; i++) {
+          const angle = (i / numLights) * Math.PI * 2;
+          const ringLight = new THREE.PointLight(
+            ringProps.color,
+            ringProps.intensity / numLights,
+            ringProps.distance || 10,
+            ringProps.decay || 2
+          );
+          ringLight.position.set(
+            Math.cos(angle) * radius,
+            2, // Spawn near world origin
+            Math.sin(angle) * radius
+          );
+          ringLight.castShadow = true;
+          ringGroup.add(ringLight);
+        }
+        
+        light = ringGroup as any; // Ring is actually a group
+        
+        // Create ring helper visualization
+        const helperGroup = new THREE.Group();
+        helperGroup.name = `${name}_helper`;
+        helperGroup.userData = {
+          isLightHelper: true,
+          lightId: id,
+          lightType: 'ring',
+          selectable: true
+        };
+        
+        // Ring geometry for visualization
+        const ringGeometry = new THREE.RingGeometry(radius - 0.1, radius + 0.1, 32);
+        const ringMaterial = new THREE.MeshBasicMaterial({ 
+          color: ringProps.color,
+          transparent: true,
+          opacity: 0.6,
+          side: THREE.DoubleSide
+        });
+        const ringMesh = new THREE.Mesh(ringGeometry, ringMaterial);
+        ringMesh.rotation.x = -Math.PI / 2; // Lay flat
+        ringMesh.position.y = 2;
+        helperGroup.add(ringMesh);
+        
+        // Add point indicators at light positions
+        for (let i = 0; i < numLights; i++) {
+          const angle = (i / numLights) * Math.PI * 2;
+          const pointGeometry = new THREE.SphereGeometry(0.05, 8, 6);
+          const pointMaterial = new THREE.MeshBasicMaterial({ 
+            color: ringProps.color,
+            transparent: true,
+            opacity: 0.8
+          });
+          const pointSphere = new THREE.Mesh(pointGeometry, pointMaterial);
+          pointSphere.position.set(
+            Math.cos(angle) * radius,
+            2,
+            Math.sin(angle) * radius
+          );
+          helperGroup.add(pointSphere);
+        }
+        
+        helper = helperGroup;
+        break;
+      }
+
       default:
         throw new Error(`Unsupported light type: ${type}`);
     }
@@ -393,6 +489,32 @@ export class ModernLightingSystem {
     // Store config
     this.lights.set(id, config);
 
+    // Add light selector for viewport interaction (invisible clickable sphere)
+    if (type !== 'ambient') { // Ambient lights don't have position
+      const selectorGeometry = new THREE.SphereGeometry(0.3, 16, 16);
+      const selectorMaterial = new THREE.MeshBasicMaterial({
+        color: 0xffff00,
+        transparent: true,
+        opacity: 0, // Invisible but clickable
+        side: THREE.DoubleSide
+      });
+      const selector = new THREE.Mesh(selectorGeometry, selectorMaterial);
+      selector.name = `${name}_selector`;
+      selector.position.copy(light.position);
+      selector.userData = {
+        isLightSelector: true,
+        lightId: id,
+        lightType: type,
+        selectable: true,
+        targetLight: light
+      };
+      
+      this.scene.add(selector);
+      
+      // Store selector reference for updates
+      config.selector = selector;
+    }
+
     console.log(`✨ Created ${type} light:`, name);
     return id;
   }
@@ -411,6 +533,9 @@ export class ModernLightingSystem {
     }
     if (config.emissiveMesh) {
       this.scene.remove(config.emissiveMesh);
+    }
+    if (config.selector) {
+      this.scene.remove(config.selector);
     }
 
     // Remove from storage
@@ -500,6 +625,11 @@ export class ModernLightingSystem {
           // Update emissive mesh position
           if (emissiveMesh) {
             emissiveMesh.position.copy(light.position);
+          }
+          
+          // Update selector position
+          if (config.selector) {
+            config.selector.position.copy(light.position);
           }
           
           // For spot lights, update the source sphere position in the helper group
@@ -694,6 +824,21 @@ export class ModernLightingSystem {
         position: new THREE.Vector3(0, 3, 0),
         width: 2,
         height: 2
+      },
+      hemisphere: {
+        intensity: 0.6,
+        color: '#ffffff',
+        skyColor: '#87CEEB',
+        groundColor: '#444444',
+        position: new THREE.Vector3(0, 3, 0)
+      },
+      ring: {
+        intensity: 0.8,
+        color: '#ffffff',
+        position: new THREE.Vector3(0, 3, 0),
+        radius: 3,
+        distance: 10,
+        decay: 2
       }
     };
 

@@ -63,7 +63,18 @@ function App() {
     (window as any).con3d = configurator;
     
     const handleMeshSelection = (mesh: THREE.Mesh | null) => {
-      console.log('🎯 Mesh selected:', mesh?.name, mesh?.type);
+      console.log('🎯 Object selected:', mesh?.name, mesh?.type);
+      
+      // Check if this is a light selector
+      if (mesh && mesh.userData?.isLightSelector) {
+        console.log('💡 Light selected:', mesh.userData.lightId, mesh.userData.lightType);
+        console.log('🔧 Light selection detected - transform controls could be added here');
+        
+        // Set selectedMesh to null since this is a light, not a mesh
+        setSelectedMesh(null);
+        return;
+      }
+      
       if (mesh?.material) {
         console.log('Material info:', {
           type: Array.isArray(mesh.material) ? `Array[${mesh.material.length}]` : (mesh.material as any).type,

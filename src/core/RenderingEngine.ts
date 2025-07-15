@@ -796,7 +796,8 @@ export class RenderingEngine {
       camera.updateProjectionMatrix();
     } else if (camera instanceof THREE.OrthographicCamera) {
       const aspect = this.renderer.domElement.clientWidth / this.renderer.domElement.clientHeight;
-      const frustumSize = 10;
+      // Use a smaller frustum size to prevent zoom-out effect when switching cameras
+      const frustumSize = 5;
       camera.left = frustumSize * aspect / -2;
       camera.right = frustumSize * aspect / 2;
       camera.top = frustumSize / 2;

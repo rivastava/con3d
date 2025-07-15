@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RectAreaLightUniformsLib } from 'three-stdlib';
 import { LightConfig, LightParameters } from '@/types';
 
 export class LightingManager {
@@ -8,10 +9,13 @@ export class LightingManager {
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
+    
+    // Initialize RectAreaLight uniforms for area light support
+    RectAreaLightUniformsLib.init();
   }
 
   /**
-   * Add default lighting setup
+   * Add default lighting setup - only 3 essential lights
    */
   public addDefaultLights(): void {
     console.log('🌞 Adding default ambient light...');
@@ -62,26 +66,6 @@ export class LightingManager {
         color: 0xffffff,
         intensity: 0.8,
         position: [5, 8, 5],
-        distance: 100,
-        decay: 2,
-        castShadow: true
-      },
-      visible: true
-    });
-
-    console.log('🔦 Adding default spot light...');
-    // Spot light
-    this.addLight({
-      id: 'default-spot',
-      name: 'Spot Light',
-      type: 'spot',
-      parameters: {
-        color: 0xffffff,
-        intensity: 0.6,
-        position: [-5, 10, 8],
-        target: [0, 0, 0],
-        angle: Math.PI / 6,
-        penumbra: 0.2,
         distance: 100,
         decay: 2,
         castShadow: true

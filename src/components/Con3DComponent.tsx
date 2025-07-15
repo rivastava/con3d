@@ -88,6 +88,67 @@ export const Con3DComponent: React.FC<Con3DComponentProps> = ({
           }
         }, 2000);
 
+        // Add keyboard event listener for F key focus functionality
+        const handleKeyDown = (event: KeyboardEvent) => {
+          if (!configuratorRef.current) return;
+          
+          // F key to focus on last selected object
+          if (event.key === 'f' || event.key === 'F') {
+            // Prevent default browser behavior
+            event.preventDefault();
+            
+            try {
+              const configurator = configuratorRef.current;
+              const renderingEngine = configurator.getRenderingEngine();
+              const selectedObjects = renderingEngine.scene.children.filter(child => 
+                child.userData?.selected === true && 
+                child.userData?.isSelectable !== false &&
+                child.name !== 'shadowCatcher' &&
+                !child.name.includes('TransformControl') &&
+                !child.name.includes('_helper')
+              );
+              
+              if (selectedObjects.length > 0) {
+                // Focus on the last selected object
+                const lastSelected = selectedObjects[selectedObjects.length - 1];
+                log(`Focusing on selected object: ${lastSelected.name}`);
+                configurator.focusCameraOnObject(lastSelected);
+              } else {
+                // If no object selected, focus on the entire scene
+                log('No object selected, focusing on scene');
+                const sceneObjects = renderingEngine.scene.children.filter(child => 
+                  child.userData?.isSelectable !== false &&
+                  child.name !== 'shadowCatcher' &&
+                  !child.name.includes('TransformControl') &&
+                  !child.name.includes('_helper') &&
+                  child.type === 'Mesh'
+                );
+                
+                if (sceneObjects.length > 0) {
+                  // Create a group to encompass all scene objects for focusing
+                  const tempGroup = new THREE.Group();
+                  sceneObjects.forEach(obj => {
+                    tempGroup.add(obj.clone());
+                  });
+                  configurator.focusCameraOnObject(tempGroup);
+                }
+              }
+            } catch (error) {
+              console.error('Error during F key focus:', error);
+            }
+          }
+        };
+
+        // Add event listener
+        window.addEventListener('keydown', handleKeyDown);
+        
+        // Store cleanup function for the outer useEffect
+        const keyboardCleanup = () => {
+          window.removeEventListener('keydown', handleKeyDown);
+        };
+        
+        // Store cleanup on configurator ref for later use
+        (configurator as any).keyboardCleanup = keyboardCleanup;
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Failed to initialize configurator';
         console.error('Configurator initialization error:', err);
@@ -107,6 +168,15 @@ export const Con3DComponent: React.FC<Con3DComponentProps> = ({
       }
     };
   }, [apiKey, containerId, options, onReady, onError]);
+
+  // Cleanup keyboard listener on unmount
+  useEffect(() => {
+    return () => {
+      if (configuratorRef.current && (configuratorRef.current as any).keyboardCleanup) {
+        (configuratorRef.current as any).keyboardCleanup();
+      }
+    };
+  }, []);
 
   // Drag and drop handlers
   const handleDragEnter = (e: React.DragEvent) => {

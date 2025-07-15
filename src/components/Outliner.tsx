@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import * as THREE from 'three';
 import { Con3DConfigurator } from '@/core/Con3DConfigurator';
+import { categorizeObject, ObjectCategory } from '@/utils/meshFiltering';
 
 interface OutlinerProps {
   configurator: Con3DConfigurator;
@@ -74,57 +75,13 @@ export const Outliner: React.FC<OutlinerProps> = ({
   };
 
   const shouldShowInOutliner = (object: THREE.Object3D): boolean => {
-    // Filter out helper objects and internal objects
-    if (object.name.includes('helper')) return false;
-    if (object.name.includes('Helper')) return false;
-    if (object.name.includes('gizmo')) return false;
-    if (object.userData.hideInOutliner) return false;
-    if (object.userData.isHelper) return false;
-    if (object.userData.isLightTarget) return false;
-    if (object.userData.isLightSelector) return false;
-    if (object.userData.isTransformControls) return false;
-    if (object.userData.isSelectionHelper) return false;
-    
-    // Exclude specific helper types
-    const excludedTypes = [
-      'GridHelper',
-      'AxesHelper', 
-      'ArrowHelper',
-      'BoxHelper',
-      'PlaneHelper',
-      'PointLightHelper',
-      'DirectionalLightHelper',
-      'SpotLightHelper',
-      'HemisphereLightHelper',
-      'CameraHelper'
-    ];
-    
-    if (excludedTypes.includes(object.type)) return false;
-    
-    // Exclude unnamed Object3D (usually light targets or helpers)
-    if (object.type === 'Object3D' && (!object.name || object.name === '')) return false;
-    if (object.type === 'Object3D' && object.name.includes('_target')) return false;
-    if (object.type === 'Object3D' && object.name.includes('_selector')) return false;
-    
-    // Only show meaningful objects
-    const meaningfulTypes = [
-      'Mesh', 
-      'Group', 
-      'DirectionalLight', 
-      'PointLight', 
-      'SpotLight', 
-      'AmbientLight', 
-      'HemisphereLight', 
-      'RectAreaLight',
-      'PerspectiveCamera',
-      'OrthographicCamera'
-    ];
-    
-    return meaningfulTypes.includes(object.type) || 
-           (object instanceof THREE.Mesh) ||
-           (object instanceof THREE.Light) ||
-           (object instanceof THREE.Camera) ||
-           (object instanceof THREE.Group && object.children.length > 0);
+    const category = categorizeObject(object);
+    return category === ObjectCategory.USER_MESH || 
+           category === ObjectCategory.USER_LIGHT ||
+           (object instanceof THREE.Group && object.children.some(child => 
+             categorizeObject(child) === ObjectCategory.USER_MESH || 
+             categorizeObject(child) === ObjectCategory.USER_LIGHT
+           ));
   };
 
   const getObjectTypeName = (object: THREE.Object3D): string => {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import * as THREE from 'three';
 import { Con3DConfigurator } from '@/core/Con3DConfigurator';
+import { categorizeObject, ObjectCategory } from '@/utils/meshFiltering';
 
 interface LightLinkerProps {
   configurator: Con3DConfigurator;
@@ -34,41 +35,9 @@ export const LightLinker: React.FC<LightLinkerProps> = ({ configurator }) => {
   const [selectedMesh, setSelectedMesh] = useState<string | null>(null);
   const [showMatrix, setShowMatrix] = useState(false);
 
-  // Helper function to check if an object is a helper or system object
-  const isHelperOrSystemObject = (object: THREE.Object3D): boolean => {
-    const name = object.name?.toLowerCase() || '';
-    const userData = object.userData || {};
-    
-    // Check for helper/system indicators
-    if (name.includes('helper') || name.includes('gizmo') || name.includes('target') || name.includes('selector')) {
-      return true;
-    }
-    
-    // Check userData flags
-    if (userData.isHelper || userData.isSystemObject || userData.hideInOutliner) {
-      return true;
-    }
-    
-    // Check for transform control axis names (X, Y, Z, etc.)
-    if (['x', 'y', 'z', 'xyz', 'yz', 'xz', 'xy'].includes(name)) {
-      return true;
-    }
-    
-    return false;
-  };
-
   // Helper function to check if a mesh is valid for light linking
   const isValidMeshForLinking = (object: THREE.Mesh): boolean => {
-    if (!object.name) return false;
-    if (isHelperOrSystemObject(object)) return false;
-    
-    // Only include user-created or loaded meshes
-    const validMeshPrefixes = ['Main', 'Chrome', 'Glass', 'Gold', 'Ground', 'Cube', 'Sphere', 'Torus', 'Plane'];
-    const name = object.name;
-    
-    // Accept meshes with recognizable names or those that don't look like helpers
-    return validMeshPrefixes.some(prefix => name.includes(prefix)) || 
-           (!name.includes('Helper') && !name.includes('helper') && !name.includes('Gizmo'));
+    return categorizeObject(object) === ObjectCategory.USER_MESH;
   };
 
   // Get the advanced lighting system from the configurator
@@ -124,7 +93,7 @@ export const LightLinker: React.FC<LightLinkerProps> = ({ configurator }) => {
       const foundMeshes: MeshObject[] = [];
 
       scene.traverse((object) => {
-        if (object instanceof THREE.Light && object.name && !isHelperOrSystemObject(object)) {
+        if (object instanceof THREE.Light && object.name && categorizeObject(object) !== ObjectCategory.SYSTEM_HELPER) {
           foundLights.push({
             id: object.uuid,
             name: object.name || `${object.type} ${object.uuid.slice(0, 8)}`,

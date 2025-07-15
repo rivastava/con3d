@@ -41,6 +41,21 @@ export class SceneTransformControls {
     this.transformControls.setSize(this.currentSize);
     this.transformControls.setSpace(this.currentSpace);
     
+    // Mark the transform controls and all their children as system objects
+    this.transformControls.userData.isTransformControl = true;
+    this.transformControls.userData.isSystemObject = true;
+    this.transformControls.name = 'TransformControls';
+    
+    // Mark all children (gizmo elements) as transform handles
+    this.transformControls.traverse((child) => {
+      child.userData.isTransformControl = true;
+      child.userData.isSystemObject = true;
+      child.userData.isTransformHandle = true;
+      if (!child.name) {
+        child.name = `TransformControl_${child.type}`;
+      }
+    });
+    
     // Disable orbit controls when using transform controls
     (this.transformControls as any).addEventListener('dragging-changed', (event: any) => {
       this.isDragging = event.value;
@@ -411,6 +426,16 @@ export class SceneTransformControls {
         
         this.transformControls.attach(mesh);
         this.transformControls.visible = true;
+        
+        // Mark all transform control children as system objects after attachment
+        this.transformControls.traverse((child) => {
+          child.userData.isTransformControl = true;
+          child.userData.isSystemObject = true;
+          child.userData.isTransformHandle = true;
+          if (!child.name) {
+            child.name = `TransformControl_${child.type}`;
+          }
+        });
         
         // Smart size calculation based on camera distance and object size
         const box = new THREE.Box3().setFromObject(mesh);
